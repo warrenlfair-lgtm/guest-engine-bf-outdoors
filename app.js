@@ -151,7 +151,7 @@ function openEditModal(id) {
   propertyName.value = property.property_name || "";
   propertyAddress.value = property.address || "";
   propertyIcal.value = property.ical_url || "";
-  standardDay.value = property.standard_service_day || "Thursday";
+  standardDay.value = property.standard_service_day || "Wednesday";
   coverageDays.value = property.coverage_days || 2;
   offCycleCharge.value = property.default_off_cycle_charge || 65;
 
@@ -859,7 +859,7 @@ function clearPropertyForm() {
   propertyName.value = "";
   propertyAddress.value = "";
   propertyIcal.value = "";
-  standardDay.value = "Thursday";
+  standardDay.value = "Wednesday";
   coverageDays.value = 2;
   offCycleCharge.value = 65;
 }
@@ -912,14 +912,15 @@ function refreshBillingCard() {
   cleaningTasks.forEach(task => {
     const taskDate = task.service_date;
     const isCurrentMonth = taskDate >= monthStartString && taskDate <= monthEndString;
-    const hasCharge = Number(task.charge || 0) > 0;
+    const taskBillingAmount = getTaskBillingAmount(task);
+    const hasCharge = taskBillingAmount > 0;
     
     if (isCurrentMonth && hasCharge) {
-      totalBillableAmount += Number(task.charge);
+      totalBillableAmount += taskBillingAmount;
       totalBillableTaskCount += 1;
       
       if (task.invoiced) {
-        invoicedAmount += Number(task.charge);
+        invoicedAmount += taskBillingAmount;
         invoicedTaskCount += 1;
       }
     }
@@ -1068,6 +1069,90 @@ function getUpcomingCleaningTasks() {
 
 function isTaskGuestReady(task) {
   return Boolean(task.guest_ready || task.service_type === "Guest Ready");
+}
+
+function getDayNameFromDateString(dateString) {
+  if (!dateString) return null;
+  const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  return dayNames[parseDateString(dateString).getUTCDay()];
+}
+
+function getDayNumberFromName(dayName) {
+  const days = {
+    Sunday: 0,
+    Monday: 1,
+    Tuesday: 2,
+    Wednesday: 3,
+    Thursday: 4,
+    Friday: 5,
+    Saturday: 6,
+  };
+  return days[dayName];
+}
+
+function getIncludedDaysForStandardDay(standardDay) {
+  const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  const standardDayNumber = getDayNumberFromName(standardDay);
+  if (standardDayNumber === undefined) {
+    return new Set(["Tuesday", "Wednesday", "Thursday"]);
+  }
+
+  const previousDay = dayNames[(standardDayNumber + 6) % 7];
+  const nextDay = dayNames[(standardDayNumber + 1) % 7];
+  return new Set([previousDay, standardDay, nextDay]);
+}
+
+function formatIncludedDaysLabel(includedDaysSet) {
+  const orderedDayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  return orderedDayNames.filter((day) => includedDaysSet.has(day)).join("/");
+}
+
+function isSameDayCheckInGuestReadyTask(task) {
+  if (!isTaskGuestReady(task)) return false;
+  if (!task.check_in_date) return false;
+  const serviceDate = task.service_date || task.scheduled_date;
+  return Boolean(serviceDate && serviceDate === task.check_in_date);
+}
+
+function getGuestReadyBillingDetails(task) {
+  const serviceDate = task.service_date || task.scheduled_date;
+  const serviceDay = getDayNameFromDateString(serviceDate);
+  const property = properties.find((p) => p.id === task.property_id);
+  const standardDay = property?.standard_service_day || "Wednesday";
+  const includedDays = getIncludedDaysForStandardDay(standardDay);
+  const isIncluded = Boolean(serviceDay && includedDays.has(serviceDay));
+
+  if (isIncluded) {
+    return {
+      isIncluded: true,
+      isChargeable: false,
+      effectiveCharge: 0,
+      serviceDay,
+      standardDay,
+      includedDaysLabel: formatIncludedDaysLabel(includedDays),
+    };
+  }
+
+  const rawCharge = Number(task.charge || 0);
+  const defaultCharge = Number(property?.default_off_cycle_charge ?? 65);
+
+  return {
+    isIncluded: false,
+    isChargeable: true,
+    effectiveCharge: rawCharge > 0 ? rawCharge : defaultCharge,
+    serviceDay,
+    standardDay,
+    includedDaysLabel: formatIncludedDaysLabel(includedDays),
+  };
+}
+
+function getTaskBillingAmount(task) {
+  if (!isTaskGuestReady(task)) {
+    return Number(task.charge || 0);
+  }
+
+  const billing = getGuestReadyBillingDetails(task);
+  return billing.isChargeable ? billing.effectiveCharge : 0;
 }
 
 function renderTaskCard(task) {
@@ -1418,6 +1503,7 @@ function renderProperties() {
     
     // Apply month filter to tasks
     tasks = tasks.filter(task => taskMatchesDateFilter(task, selectedMonthFilter));
+    const hasSameDayGuestReady = tasks.some((task) => isSameDayCheckInGuestReadyTask(task));
     
     const isCollapsed = collapsedPropertyCards.has(property.id);
     const toggleButtonText = isCollapsed ? "Expand" : "Collapse";
@@ -1425,14 +1511,17 @@ function renderProperties() {
     return `
       <div class="property-card">
         <div class="property-card-header">
-          <h3>${property.property_name}</h3>
+          <div>
+            <h3>${property.property_name}</h3>
+            ${hasSameDayGuestReady ? `<span class="task-alert-badge badge-alert-red">🚨 Same-Day Check-In</span>` : ""}
+          </div>
           <button class="collapse-btn" onclick="togglePropertyCardCollapse('${property.id}')">${toggleButtonText}</button>
         </div>
 
         <div class="property-meta">
           <div><strong>Address:</strong> ${property.address || "Not entered"}</div>
-          <div><strong>Weekly Service:</strong> ${property.standard_service_day || "Thursday"}</div>
-          <div><strong>Coverage Rule:</strong> ${property.standard_service_day || "Thursday"} + next day</div>
+          <div><strong>Weekly Service:</strong> ${property.standard_service_day || "Wednesday"}</div>
+          <div><strong>Coverage Rule:</strong> ${property.standard_service_day || "Wednesday"} +/- 1 day</div>
           <div><strong>Default Off-Cycle:</strong> $${property.default_off_cycle_charge || 65}</div>
           <div><strong>iCal:</strong> ${property.ical_url ? "Saved" : "Not entered"}</div>
         </div>
@@ -1484,6 +1573,9 @@ function renderProperties() {
             tasks.length === 0
               ? `<p>No cleanings scheduled.</p>`
               : tasks.map((task) => {
+                  const taskBillingAmount = getTaskBillingAmount(task);
+                  const guestReadyBilling = isTaskGuestReady(task) ? getGuestReadyBillingDetails(task) : null;
+                  const invoiceMarkerClass = task.invoiced ? "invoice-marker-checked" : "invoice-marker-unchecked";
                   const taskClass =
                     task.status === "Completed"
                       ? "task-item completed"
@@ -1502,11 +1594,29 @@ function renderProperties() {
                       ? `<span class="status-badge badge-purple">OFF CYCLE</span>`
                       : `<span class="status-badge badge-blue">SCHEDULED</span>`;
 
+                  const billingLine = guestReadyBilling
+                    ? guestReadyBilling.isIncluded
+                      ? `<div class="task-line"><small>Billing: Included (${guestReadyBilling.serviceDay}; ${guestReadyBilling.standardDay} route window: ${guestReadyBilling.includedDaysLabel})</small></div>`
+                      : `<div class="task-line"><small>Billing: Chargeable (${guestReadyBilling.serviceDay || "Outside route window"}; ${guestReadyBilling.standardDay} route window: ${guestReadyBilling.includedDaysLabel})</small></div>`
+                    : "";
+
+                  const sameDayBadge = isSameDayCheckInGuestReadyTask(task)
+                    ? `<span class="task-alert-badge badge-alert-red">🚨 Same-Day Check-In</span>`
+                    : "";
+
                   return `
                     <div class="${taskClass}">
-                      <div class="task-title">${task.service_date} — ${task.service_type}</div>
+                      <div class="task-item-header">
+                        <div class="task-title">${task.service_date} — ${task.service_type}</div>
+                        <label class="invoice-marker ${invoiceMarkerClass}">
+                          <input type="checkbox" ${task.invoiced ? "checked" : ""} onchange="toggleInvoiceMarker('${task.id}')" />
+                          <span>$ Reconcile</span>
+                        </label>
+                      </div>
                       ${badge}
-                      ${task.charge > 0 ? `<div class="task-line">$${task.charge}</div>` : ""}
+                      ${sameDayBadge}
+                      ${taskBillingAmount > 0 ? `<div class="task-line">$${taskBillingAmount}</div>` : ""}
+                      ${billingLine}
                       <div class="task-line"><small>Status: ${task.status}</small></div>
                       ${task.completed_at ? `<div class="task-line"><small>Completed: ${new Date(task.completed_at).toLocaleString()}</small></div>` : ""}
                       ${task.check_in_date ? `<div class="task-line"><small>Prior to check-in: ${task.check_in_date}</small></div>` : ""}

@@ -140,6 +140,26 @@ function getGuestReadyServiceDate(reservation: { check_in: string; check_out: st
   return hasSameDayTurnover ? reservation.check_in : addDays(reservation.check_in, -1);
 }
 
+function isGuestReadyIncludedDay(serviceDate: string, standardDay: string) {
+  const serviceDayNumber = parseDateString(serviceDate).getUTCDay();
+  const standardDayNumber = getDayNumber(standardDay);
+  if (standardDayNumber === undefined) {
+    return false;
+  }
+
+  const previousDayNumber = (standardDayNumber + 6) % 7;
+  const nextDayNumber = (standardDayNumber + 1) % 7;
+
+  return serviceDayNumber === previousDayNumber || serviceDayNumber === standardDayNumber || serviceDayNumber === nextDayNumber;
+}
+
+function getGuestReadyCharge(serviceDate: string, standardDay: string, defaultOffCycleCharge: number | null) {
+  if (isGuestReadyIncludedDay(serviceDate, standardDay)) {
+    return 0;
+  }
+  return Number(defaultOffCycleCharge ?? 65);
+}
+
 Deno.serve(async (req) => {
   let reservationsCreated = 0;
   let tasksCreated = 0;
@@ -284,7 +304,7 @@ Deno.serve(async (req) => {
       console.log("STEP 3 reservations inserted");
     }
 
-    const standardDay = property.standard_service_day || "Thursday";
+    const standardDay = property.standard_service_day || "Wednesday";
 
     // Build source_key -> service_date mapping for all weekly tasks this sync run needs.
     // source_key is a stable identity for "the weekly task for property X in the week containing check-in Y".
@@ -398,6 +418,7 @@ Deno.serve(async (req) => {
 
       if (!coveredByStandard) {
         const guestReadyServiceDate = getGuestReadyServiceDate(reservation, activeReservations);
+        const guestReadyCharge = getGuestReadyCharge(guestReadyServiceDate, standardDay, property.default_off_cycle_charge);
         const guestReadySourceKey = `gr:${propertyId}:${reservation.check_in}`;
         const existingGuestReady = existingGuestReadyMap.get(guestReadySourceKey);
         
@@ -417,9 +438,9 @@ Deno.serve(async (req) => {
             check_in_date: reservation.check_in,
             service_type: "Guest Ready",
             status: "Scheduled",
-            off_cycle: true,
+            off_cycle: guestReadyCharge > 0,
             guest_ready: true,
-            charge: Number(property.default_off_cycle_charge ?? 65),
+            charge: guestReadyCharge,
             notes: `Auto-created from iCal sync for check-in ${reservation.check_in}.`,
             source_type: "reservation_guest_ready",
             source_key: guestReadySourceKey,
