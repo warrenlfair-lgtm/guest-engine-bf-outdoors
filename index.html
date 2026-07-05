@@ -44,6 +44,7 @@
     <button type="button" class="view-btn active" data-view="today">Today View</button>
     <button type="button" class="view-btn" data-view="week">Week View</button>
     <button type="button" class="view-btn" data-view="properties">Properties</button>
+    <button type="button" class="view-btn" data-view="billing">Billing Report</button>
   </div>
 
   <section id="todayView" class="view-panel active">
@@ -103,6 +104,35 @@
     </div>
     
     <div id="propertyList"></div>
+  </section>
+
+  <section id="billingView" class="view-panel">
+    <div class="view-header billing-report-header-row">
+      <div>
+        <h2>Billing Report</h2>
+        <p>Printable report of billable completed Guest Ready cleanings.</p>
+      </div>
+      <button type="button" id="billingPrintBtn" class="print-btn">Print / Save as PDF</button>
+    </div>
+
+    <div class="billing-filters" id="billingFilterPanel">
+      <div class="filter-group">
+        <label for="billingStartDate">Start Date:</label>
+        <input id="billingStartDate" type="date">
+      </div>
+      <div class="filter-group">
+        <label for="billingEndDate">End Date:</label>
+        <input id="billingEndDate" type="date">
+      </div>
+      <div class="filter-group">
+        <label for="billingPropertySelect">Property:</label>
+        <select id="billingPropertySelect">
+          <option value="">All Properties</option>
+        </select>
+      </div>
+    </div>
+
+    <div id="billingReportContainer" class="billing-report-paper"></div>
   </section>
 </div>
 

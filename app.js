@@ -59,6 +59,13 @@ const debugTaskCount = document.getElementById("debugTaskCount");
 const propertyFilterSelect = document.getElementById("propertyFilterSelect");
 const monthFilterSelect = document.getElementById("monthFilterSelect");
 const weekViewDefaultCheckbox = document.getElementById("weekViewDefault");
+const billingStartDate = document.getElementById("billingStartDate");
+const billingEndDate = document.getElementById("billingEndDate");
+const billingPropertySelect = document.getElementById("billingPropertySelect");
+const billingReconciledOnly = document.getElementById("billingReconciledOnly");
+const billingRunBtn = document.getElementById("billingRunBtn");
+const billingPrintBtn = document.getElementById("billingPrintBtn");
+const billingReportContainer = document.getElementById("billingReportContainer");
 
 addPropertyBtn.onclick = openAddModal;
 cancelBtn.onclick = closePropertyModal;
@@ -111,7 +118,32 @@ if (debugTasksBtn) {
   debugTasksBtn.addEventListener("click", debugCleaningTasks);
 }
 
+if (billingRunBtn) {
+  billingRunBtn.addEventListener("click", renderBillingReport);
+}
+
+if (billingPrintBtn) {
+  billingPrintBtn.addEventListener("click", () => window.print());
+}
+
+if (billingStartDate) {
+  billingStartDate.addEventListener("change", renderBillingReport);
+}
+
+if (billingEndDate) {
+  billingEndDate.addEventListener("change", renderBillingReport);
+}
+
+if (billingPropertySelect) {
+  billingPropertySelect.addEventListener("change", renderBillingReport);
+}
+
+if (billingReconciledOnly) {
+  billingReconciledOnly.addEventListener("change", renderBillingReport);
+}
+
 initializeWeekViewMode();
+initializeBillingReportFilters();
 loadData();
 
 function initializeWeekViewMode() {
@@ -134,6 +166,25 @@ function showView(viewName) {
   document.querySelectorAll(".view-btn").forEach((button) => {
     button.classList.toggle("active", button.dataset.view === viewName);
   });
+
+  if (viewName === "billing") {
+    renderBillingReport();
+  }
+}
+
+function initializeBillingReportFilters() {
+  if (!billingStartDate || !billingEndDate) return;
+
+  const today = new Date();
+  const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+  const monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+
+  billingStartDate.value = formatDateValue(monthStart);
+  billingEndDate.value = formatDateValue(monthEnd);
+
+  if (billingReconciledOnly) {
+    billingReconciledOnly.checked = true;
+  }
 }
 
 function openAddModal() {
@@ -369,6 +420,7 @@ async function loadData() {
   renderTaskViews();
   renderProperties();
   renderOperationsRemindersWidget();
+  renderBillingReport();
 }
 
 async function loadProperties() {
@@ -1155,6 +1207,153 @@ function getTaskBillingAmount(task) {
   return billing.isChargeable ? billing.effectiveCharge : 0;
 }
 
+function getBillingReportRows() {
+  if (!billingStartDate || !billingEndDate) return [];
+
+  const startDate = billingStartDate.value;
+  const endDate = billingEndDate.value;
+  if (!startDate || !endDate) return [];
+
+  const selectedPropertyId = billingPropertySelect?.value || "";
+  const reconciledOnly = billingReconciledOnly?.checked === true;
+
+  const isTaskReconciled = (task) => {
+    return task.invoiced === true || task.invoiced === 1 || task.invoiced === "true";
+  };
+
+  return cleaningTasks
+    .filter((task) => isTaskGuestReady(task))
+    .filter((task) => String(task.status || "").toLowerCase() === "completed")
+    .filter((task) => {
+      const taskDate = task.service_date || task.scheduled_date;
+      return Boolean(taskDate && taskDate >= startDate && taskDate <= endDate);
+    })
+    .filter((task) => !selectedPropertyId || task.property_id === selectedPropertyId)
+    .filter((task) => {
+      if (!reconciledOnly) return true;
+      return isTaskReconciled(task);
+    })
+    .map((task) => {
+      const amount = getTaskBillingAmount(task);
+      return {
+        ...task,
+        billableAmount: amount,
+      };
+    })
+    .filter((task) => task.billableAmount > 0)
+    .sort((a, b) => {
+      const aName = getPropertyName(a.property_id);
+      const bName = getPropertyName(b.property_id);
+      if (aName !== bName) return aName.localeCompare(bName);
+      const aDate = a.service_date || a.scheduled_date || "";
+      const bDate = b.service_date || b.scheduled_date || "";
+      return aDate.localeCompare(bDate);
+    });
+}
+
+function renderBillingReport() {
+  if (!billingReportContainer) return;
+
+  const propertyOptions = `<option value="">All Properties</option>${properties
+    .slice()
+    .sort((a, b) => (a.property_name || "").localeCompare(b.property_name || ""))
+    .map((p) => `<option value="${p.id}">${p.property_name}</option>`)
+    .join("")}`;
+
+  if (billingPropertySelect && billingPropertySelect.innerHTML !== propertyOptions) {
+    const previousValue = billingPropertySelect.value;
+    billingPropertySelect.innerHTML = propertyOptions;
+    billingPropertySelect.value = previousValue;
+  }
+
+  const rows = getBillingReportRows();
+  const startDate = billingStartDate?.value || "";
+  const endDate = billingEndDate?.value || "";
+  const generatedDate = new Date().toLocaleDateString();
+
+  if (!startDate || !endDate) {
+    billingReportContainer.innerHTML = `<div class="empty">Select a start and end date to run the billing report.</div>`;
+    return;
+  }
+
+  const grouped = new Map();
+  for (const row of rows) {
+    const propertyName = getPropertyName(row.property_id);
+    if (!grouped.has(propertyName)) {
+      grouped.set(propertyName, []);
+    }
+    grouped.get(propertyName).push(row);
+  }
+
+  let grandTotal = 0;
+  const groupMarkup = Array.from(grouped.entries()).map(([propertyName, items]) => {
+    const subtotal = items.reduce((sum, item) => sum + Number(item.billableAmount || 0), 0);
+    grandTotal += subtotal;
+
+    const rowsHtml = items.map((item) => {
+      const dateLabel = item.service_date || item.scheduled_date || "-";
+      return `
+        <tr>
+          <td>${dateLabel}</td>
+          <td>Guest Ready Cleaning</td>
+          <td class="billing-report-amount">$${Number(item.billableAmount).toFixed(2)}</td>
+        </tr>
+      `;
+    }).join("");
+
+    return `
+      <section class="billing-report-group">
+        <h3>${propertyName}</h3>
+        <table class="billing-report-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Service</th>
+              <th>Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rowsHtml}
+          </tbody>
+        </table>
+        <div class="billing-report-subtotal">Property Subtotal: $${subtotal.toFixed(2)}</div>
+      </section>
+    `;
+  }).join("");
+
+  if (!rows.length) {
+    billingReportContainer.innerHTML = `
+      <div class="billing-report-sheet">
+        <div class="billing-report-brand">Guest Ready Pool Pros</div>
+        <div class="billing-report-brand-subtitle">Vacation Rental Pool Service Specialists</div>
+        <h2 class="billing-report-title">Guest Ready Cleaning Report</h2>
+        <div class="billing-report-meta">Billing Period: ${startDate} to ${endDate}</div>
+        <div class="billing-report-meta">Generated: ${generatedDate}</div>
+        <div class="empty">No billable completed Guest Ready tasks found for the selected filters.</div>
+      </div>
+    `;
+    return;
+  }
+
+  billingReportContainer.innerHTML = `
+    <div class="billing-report-sheet">
+      <div class="billing-report-brand">Guest Ready Pool Pros</div>
+      <div class="billing-report-brand-subtitle">Vacation Rental Pool Service Specialists</div>
+      <h2 class="billing-report-title">Guest Ready Cleaning Report</h2>
+      <div class="billing-report-meta">Billing Period: ${startDate} to ${endDate}</div>
+      <div class="billing-report-meta">Generated: ${generatedDate}</div>
+      ${groupMarkup}
+      <div class="billing-report-grand-total">Grand Total: $${grandTotal.toFixed(2)}</div>
+    </div>
+  `;
+}
+
+function shouldShowReconcileForTask(task) {
+  if (!task) return false;
+  if (task.service_type === "Weekly Standard") return false;
+  return getTaskBillingAmount(task) > 0;
+}
+
 function renderTaskCard(task) {
   const status = task.status || "Scheduled";
   const cardClass = task.status === "Completed"
@@ -1168,16 +1367,19 @@ function renderTaskCard(task) {
       ? "badge-yellow"
       : "badge-blue";
   const alertBadge = getAlertBadgeForTask(task);
+  const showReconcile = shouldShowReconcileForTask(task);
   const invoiceMarkerClass = task.invoiced ? "invoice-marker-checked" : "invoice-marker-unchecked";
 
   return `
     <div class="${cardClass}">
       <div class="task-card-header">
         <div class="task-card-title">${getPropertyName(task.property_id)}</div>
+        ${showReconcile ? `
         <label class="invoice-marker ${invoiceMarkerClass}">
           <input type="checkbox" ${task.invoiced ? "checked" : ""} onchange="toggleInvoiceMarker('${task.id}')" />
           <span>$</span>
         </label>
+        ` : ""}
       </div>
       ${alertBadge}
       <div class="task-card-details">
@@ -1423,16 +1625,19 @@ function renderWeekViewCalendar(weekTasks) {
                     const completedBadge = task.status === "Completed" ? `<span class="status-badge badge-green">COMPLETED</span>` : '';
                     const badgesToShow = guestReadyBadge || completedBadge || `<span class="status-badge badge-blue">${task.status || 'Scheduled'}</span>`;
                     const alertBadge = getAlertBadgeForTask(task);
+                    const showReconcile = shouldShowReconcileForTask(task);
                     const invoiceMarkerClass = task.invoiced ? "invoice-marker-checked" : "invoice-marker-unchecked";
                     
                     return `
                       <div class="calendar-task-card">
                         <div class="calendar-task-header">
                           <div class="calendar-task-property">${propertyName}</div>
+                          ${showReconcile ? `
                           <label class="invoice-marker ${invoiceMarkerClass}">
                             <input type="checkbox" ${task.invoiced ? "checked" : ""} onchange="toggleInvoiceMarker('${task.id}')" />
                             <span>$</span>
                           </label>
+                          ` : ""}
                         </div>
                         <div class="calendar-task-type">${task.service_type}</div>
                         ${badgesToShow}
@@ -1575,6 +1780,7 @@ function renderProperties() {
               : tasks.map((task) => {
                   const taskBillingAmount = getTaskBillingAmount(task);
                   const guestReadyBilling = isTaskGuestReady(task) ? getGuestReadyBillingDetails(task) : null;
+                  const showReconcile = shouldShowReconcileForTask(task);
                   const invoiceMarkerClass = task.invoiced ? "invoice-marker-checked" : "invoice-marker-unchecked";
                   const taskClass =
                     task.status === "Completed"
@@ -1608,10 +1814,12 @@ function renderProperties() {
                     <div class="${taskClass}">
                       <div class="task-item-header">
                         <div class="task-title">${task.service_date} — ${task.service_type}</div>
+                        ${showReconcile ? `
                         <label class="invoice-marker ${invoiceMarkerClass}">
                           <input type="checkbox" ${task.invoiced ? "checked" : ""} onchange="toggleInvoiceMarker('${task.id}')" />
                           <span>$ Reconcile</span>
                         </label>
+                        ` : ""}
                       </div>
                       ${badge}
                       ${sameDayBadge}

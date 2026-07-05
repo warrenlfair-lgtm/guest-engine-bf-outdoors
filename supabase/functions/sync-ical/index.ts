@@ -160,6 +160,11 @@ function getGuestReadyCharge(serviceDate: string, standardDay: string, defaultOf
   return Number(defaultOffCycleCharge ?? 65);
 }
 
+function isSafeAutoWeeklyTaskToSuppress(task: { manually_modified: boolean | null; status: string | null; completed_at: string | null; invoiced: boolean | null }) {
+  const status = task.status || "Scheduled";
+  return !task.manually_modified && status === "Scheduled" && !task.completed_at && !task.invoiced;
+}
+
 Deno.serve(async (req) => {
   let reservationsCreated = 0;
   let tasksCreated = 0;
@@ -324,7 +329,7 @@ Deno.serve(async (req) => {
     const { data: existingByDate } = weeklyServiceDates.length
       ? await supabase
           .from("cleaning_tasks")
-          .select("id, service_date, service_type, guest_ready, check_in_date, source_key, manually_modified")
+          .select("id, service_date, service_type, guest_ready, check_in_date, source_key, manually_modified, status, completed_at, invoiced")
           .eq("property_id", propertyId)
           .eq("service_type", "Weekly Standard")
           .in("service_date", weeklyServiceDates)
@@ -334,13 +339,13 @@ Deno.serve(async (req) => {
     const { data: existingByKey } = weeklySourceKeys.length
       ? await supabase
           .from("cleaning_tasks")
-          .select("id, service_date, service_type, guest_ready, check_in_date, source_key, manually_modified")
+          .select("id, service_date, service_type, guest_ready, check_in_date, source_key, manually_modified, status, completed_at, invoiced")
           .eq("property_id", propertyId)
           .eq("service_type", "Weekly Standard")
           .in("source_key", weeklySourceKeys)
       : { data: [] };
 
-    type WeeklyTaskRecord = { id: string; service_date: string; service_type: string; guest_ready: boolean; check_in_date: string | null; source_key: string | null; manually_modified: boolean | null };
+    type WeeklyTaskRecord = { id: string; service_date: string; service_type: string; guest_ready: boolean; check_in_date: string | null; source_key: string | null; manually_modified: boolean | null; status: string | null; completed_at: string | null; invoiced: boolean | null };
     const existingWeeklyTaskMap = new Map<string, WeeklyTaskRecord>();
     // Add by-date results first — derive source_key from the original scheduled date
     for (const task of (existingByDate || []) as WeeklyTaskRecord[]) {
@@ -371,6 +376,8 @@ Deno.serve(async (req) => {
 
     const pendingWeeklyTasks = new Map<string, { check_in_date: string | null; guest_ready: boolean }>();
     const weeklyTaskUpdates: Array<{ id: string; guest_ready: boolean; check_in_date: string | null }> = [];
+    const weeklyTaskIdsToSuppress: string[] = [];
+    const suppressedWeeklySourceKeys = new Set<string>();
     const guestReadyTasksToCreate: Array<Record<string, any>> = [];
 
     console.log("[SYNC] Starting task creation logic");
@@ -381,76 +388,106 @@ Deno.serve(async (req) => {
       if (!reservation.check_in) continue;
 
       const service_date = getServiceDateForWeek(reservation.check_in, standardDay);
-      const coveredByStandard = isCheckInCoveredByStandardDay(reservation.check_in, standardDay);
+      const guestReadyServiceDate = getGuestReadyServiceDate(reservation, activeReservations);
+      const guestReadyWithinWindow = isGuestReadyIncludedDay(guestReadyServiceDate, standardDay);
       const isSameDayAsStandard = reservation.check_in === service_date;
       const source_key = `wk:${propertyId}:${service_date}`;
       const weeklyTask = existingWeeklyTaskMap.get(source_key);
 
+      if (guestReadyWithinWindow) {
+        suppressedWeeklySourceKeys.add(source_key);
+      }
+
       console.log("[WEEKLY CHECK]", { reservation_check_in: reservation.check_in, source_key, foundExistingTask: !!weeklyTask, weeklyTask_id: weeklyTask?.id });
 
       if (weeklyTask) {
-        // Task already exists for this week — never create a duplicate.
-        // Only update guest_ready if the task has NOT been manually modified.
-        if (!weeklyTask.manually_modified && isSameDayAsStandard && (!weeklyTask.guest_ready || weeklyTask.check_in_date !== reservation.check_in)) {
-          weeklyTaskUpdates.push({
-            id: weeklyTask.id,
-            guest_ready: true,
-            check_in_date: reservation.check_in,
-          });
-          weeklyTask.guest_ready = true;
-          weeklyTask.check_in_date = reservation.check_in;
-        }
-      } else {
-        const pending = pendingWeeklyTasks.get(service_date);
-        if (pending) {
-          if (isSameDayAsStandard) {
-            pending.guest_ready = true;
-            pending.check_in_date = reservation.check_in;
+        if (guestReadyWithinWindow) {
+          if (isSafeAutoWeeklyTaskToSuppress(weeklyTask) && !weeklyTaskIdsToSuppress.includes(weeklyTask.id)) {
+            console.log("[WEEKLY SUPPRESS QUEUED]", { weekly_task_id: weeklyTask.id, source_key, reservation_check_in: reservation.check_in });
+            weeklyTaskIdsToSuppress.push(weeklyTask.id);
           }
         } else {
-          console.log("[WEEKLY ADD PENDING]", { source_key, service_date, propertyId, is_same_day: isSameDayAsStandard });
-          pendingWeeklyTasks.set(service_date, {
-            check_in_date: isSameDayAsStandard ? reservation.check_in : null,
-            guest_ready: isSameDayAsStandard,
-          });
+          // Task already exists for this week — never create a duplicate.
+          // Only update guest_ready if the task has NOT been manually modified.
+          if (!weeklyTask.manually_modified && isSameDayAsStandard && (!weeklyTask.guest_ready || weeklyTask.check_in_date !== reservation.check_in)) {
+            weeklyTaskUpdates.push({
+              id: weeklyTask.id,
+              guest_ready: true,
+              check_in_date: reservation.check_in,
+            });
+            weeklyTask.guest_ready = true;
+            weeklyTask.check_in_date = reservation.check_in;
+          }
+        }
+      } else {
+        if (guestReadyWithinWindow) {
+          pendingWeeklyTasks.delete(service_date);
+          console.log("[WEEKLY SUPPRESS PENDING]", { source_key, service_date, reservation_check_in: reservation.check_in });
+        } else {
+          const pending = pendingWeeklyTasks.get(service_date);
+          if (pending) {
+            if (isSameDayAsStandard) {
+              pending.guest_ready = true;
+              pending.check_in_date = reservation.check_in;
+            }
+          } else {
+            console.log("[WEEKLY ADD PENDING]", { source_key, service_date, propertyId, is_same_day: isSameDayAsStandard });
+            pendingWeeklyTasks.set(service_date, {
+              check_in_date: isSameDayAsStandard ? reservation.check_in : null,
+              guest_ready: isSameDayAsStandard,
+            });
+          }
         }
       }
 
-      if (!coveredByStandard) {
-        const guestReadyServiceDate = getGuestReadyServiceDate(reservation, activeReservations);
-        const guestReadyCharge = getGuestReadyCharge(guestReadyServiceDate, standardDay, property.default_off_cycle_charge);
-        const guestReadySourceKey = `gr:${propertyId}:${reservation.check_in}`;
-        const existingGuestReady = existingGuestReadyMap.get(guestReadySourceKey);
-        
-        console.log("[GUEST READY CHECK]", { reservation_check_in: reservation.check_in, source_key: guestReadySourceKey, foundExistingTask: !!existingGuestReady, existing_id: existingGuestReady?.id });
+      const guestReadyCharge = getGuestReadyCharge(guestReadyServiceDate, standardDay, property.default_off_cycle_charge);
+      const guestReadySourceKey = `gr:${propertyId}:${reservation.check_in}`;
+      const existingGuestReady = existingGuestReadyMap.get(guestReadySourceKey);
 
-        if (existingGuestReady) {
-          // Task already exists for this check-in. Never create a duplicate.
-          // Don't overwrite manually_modified tasks.
-          console.log("[GUEST READY SKIPPING]", { source_key: guestReadySourceKey, propertyId, existing_service_date: existingGuestReady.service_date });
-        } else {
-          console.log("[GUEST READY ADD PENDING]", { source_key: guestReadySourceKey, propertyId, service_date: guestReadyServiceDate });
-          guestReadyTasksToCreate.push({
-            property_id: propertyId,
-            service_date: guestReadyServiceDate,
-            scheduled_date: guestReadyServiceDate,
-            suggested_date: guestReadyServiceDate,
-            check_in_date: reservation.check_in,
-            service_type: "Guest Ready",
-            status: "Scheduled",
-            off_cycle: guestReadyCharge > 0,
-            guest_ready: true,
-            charge: guestReadyCharge,
-            notes: `Auto-created from iCal sync for check-in ${reservation.check_in}.`,
-            source_type: "reservation_guest_ready",
-            source_key: guestReadySourceKey,
-            manually_modified: false,
-          });
-        }
+      console.log("[GUEST READY CHECK]", { reservation_check_in: reservation.check_in, source_key: guestReadySourceKey, foundExistingTask: !!existingGuestReady, existing_id: existingGuestReady?.id, within_window: guestReadyWithinWindow });
+
+      if (existingGuestReady) {
+        // Task already exists for this check-in. Never create a duplicate.
+        // Don't overwrite manually_modified tasks.
+        console.log("[GUEST READY SKIPPING]", { source_key: guestReadySourceKey, propertyId, existing_service_date: existingGuestReady.service_date });
+      } else {
+        console.log("[GUEST READY ADD PENDING]", { source_key: guestReadySourceKey, propertyId, service_date: guestReadyServiceDate });
+        guestReadyTasksToCreate.push({
+          property_id: propertyId,
+          service_date: guestReadyServiceDate,
+          scheduled_date: guestReadyServiceDate,
+          suggested_date: guestReadyServiceDate,
+          check_in_date: reservation.check_in,
+          service_type: "Guest Ready",
+          status: "Scheduled",
+          off_cycle: guestReadyCharge > 0,
+          guest_ready: true,
+          charge: guestReadyCharge,
+          notes: `Auto-created from iCal sync for check-in ${reservation.check_in}.`,
+          source_type: "reservation_guest_ready",
+          source_key: guestReadySourceKey,
+          manually_modified: false,
+        });
       }
     }
 
-    const weeklyTasksToCreate = Array.from(pendingWeeklyTasks.entries()).map(([service_date, payload]) => ({
+    if (weeklyTaskIdsToSuppress.length) {
+      const { error } = await supabase
+        .from("cleaning_tasks")
+        .delete()
+        .eq("property_id", propertyId)
+        .in("id", weeklyTaskIdsToSuppress);
+      if (error) {
+        console.error("sync-ical fatal error", error?.message || error);
+        console.error("sync-ical fatal stack", error?.stack || "no stack");
+        return createSuccessResponse(reservationsCreated, tasksCreated, { reservationsParsed, activeReservations: activeReservationCount, oldIgnored, weeklyTasksCreated, guestReadyTasksCreated });
+      }
+      console.log("[WEEKLY SUPPRESS APPLIED]", weeklyTaskIdsToSuppress.length, "weekly tasks removed");
+    }
+
+    const weeklyTasksToCreate = Array.from(pendingWeeklyTasks.entries())
+      .filter(([service_date]) => !suppressedWeeklySourceKeys.has(`wk:${propertyId}:${service_date}`))
+      .map(([service_date, payload]) => ({
       property_id: propertyId,
       service_date,
       scheduled_date: service_date,
@@ -511,7 +548,10 @@ Deno.serve(async (req) => {
       }
     }
 
-    for (const update of weeklyTaskUpdates) {
+    const suppressedWeeklyTaskIdSet = new Set(weeklyTaskIdsToSuppress);
+    const filteredWeeklyTaskUpdates = weeklyTaskUpdates.filter((update) => !suppressedWeeklyTaskIdSet.has(update.id));
+
+    for (const update of filteredWeeklyTaskUpdates) {
       const { error } = await supabase
         .from("cleaning_tasks")
         .update({ guest_ready: update.guest_ready, check_in_date: update.check_in_date })

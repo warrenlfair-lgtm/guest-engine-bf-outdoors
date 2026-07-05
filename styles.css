@@ -1264,3 +1264,178 @@ textarea{
     background: #9ca3af;
     color: white;
 }
+
+.billing-report-header-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.print-btn {
+    background: #0f766e;
+}
+
+.print-btn:hover {
+    background: #0d5f58;
+}
+
+.billing-filters {
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
+    align-items: center;
+    margin-bottom: 18px;
+    padding: 16px;
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 3px 10px rgba(0,0,0,.08);
+}
+
+.billing-filters .filter-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.billing-filters .filter-group input,
+.billing-filters .filter-group select {
+    width: auto;
+    min-width: 160px;
+}
+
+.billing-checkbox-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+}
+
+.billing-checkbox-label input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+}
+
+.billing-report-paper {
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 3px 10px rgba(0,0,0,.08);
+    padding: 0;
+}
+
+.billing-report-sheet {
+    padding: 26px;
+}
+
+.billing-report-brand {
+    font-size: 24px;
+    font-weight: 700;
+    color: #0f172a;
+}
+
+.billing-report-brand-subtitle {
+    font-size: 14px;
+    font-weight: 500;
+    color: #475569;
+    margin-top: 2px;
+}
+
+.billing-report-title {
+    margin: 10px 0 6px;
+    font-size: 24px;
+}
+
+.billing-report-meta {
+    color: #475569;
+    margin-bottom: 4px;
+}
+
+.billing-report-group {
+    margin-top: 20px;
+}
+
+.billing-report-group h3 {
+    margin: 0 0 8px;
+    font-size: 18px;
+}
+
+.billing-report-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 8px;
+}
+
+.billing-report-table th,
+.billing-report-table td {
+    border-bottom: 1px solid #e5e7eb;
+    padding: 8px;
+    text-align: left;
+}
+
+.billing-report-table th {
+    background: #f8fafc;
+    font-weight: 700;
+}
+
+.billing-report-amount,
+.billing-report-subtotal,
+.billing-report-grand-total {
+    text-align: right;
+    font-weight: 700;
+}
+
+.billing-report-subtotal {
+    margin-top: 6px;
+    color: #1f2937;
+}
+
+.billing-report-grand-total {
+    margin-top: 22px;
+    padding-top: 12px;
+    border-top: 2px solid #cbd5e1;
+    font-size: 20px;
+    color: #0f172a;
+}
+
+@media print {
+    body {
+        background: white;
+    }
+
+    .header,
+    .summary,
+    .top-actions,
+    .view-toggle,
+    #todayView,
+    #weekView,
+    #propertiesView,
+    #propertyModal,
+    #cleaningModal,
+    #reminderModal,
+    #alertDetailModal,
+    #billingFilterPanel,
+    #billingPrintBtn,
+    #billingRunBtn {
+        display: none !important;
+    }
+
+    .container {
+        max-width: none;
+        margin: 0;
+        padding: 0;
+    }
+
+    #billingView {
+        display: block !important;
+    }
+
+    .billing-report-paper {
+        box-shadow: none;
+        border-radius: 0;
+    }
+
+    .billing-report-sheet {
+        padding: 0;
+    }
+}
