@@ -1943,11 +1943,35 @@ function formatIncludedDaysLabel(includedDaysSet) {
   return orderedDayNames.filter((day) => includedDaysSet.has(day)).join("/");
 }
 
+function findSameDayTurnover(propertyId, serviceDate) {
+  if (!propertyId || !serviceDate) return null;
+
+  for (const checkOut of reservations) {
+    if (checkOut.property_id !== propertyId) continue;
+    if (!checkOut.check_out || checkOut.check_out !== serviceDate) continue;
+
+    const checkIn = reservations.find((reservation) => {
+      return reservation.id !== checkOut.id
+        && reservation.property_id === propertyId
+        && reservation.check_in === serviceDate;
+    });
+
+    if (checkIn) {
+      return {
+        turnoverDate: serviceDate,
+        checkOutDate: checkOut.check_out,
+        checkInDate: checkIn.check_in,
+      };
+    }
+  }
+
+  return null;
+}
+
 function isSameDayCheckInGuestReadyTask(task) {
   if (!isTaskGuestReady(task)) return false;
-  if (!task.check_in_date) return false;
   const serviceDate = task.service_date || task.scheduled_date;
-  return Boolean(serviceDate && serviceDate === task.check_in_date);
+  return Boolean(findSameDayTurnover(task.property_id, serviceDate));
 }
 
 function isAutoWeeklyTask(task) {
