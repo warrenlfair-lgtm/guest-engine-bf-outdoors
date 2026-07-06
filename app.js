@@ -27,6 +27,7 @@ let weekViewMode = localStorage.getItem("guestReadyDefaultWeekView") || "calenda
 const PROTECTED_VIEWS = new Set(["billing", "messages"]);
 let isProtectedAccessUnlocked = false;
 let pinModalResolver = null;
+const MANUAL_BILLING_OVERRIDE_TAG = "[Manual Override]";
 
 const addPropertyBtn = document.getElementById("addPropertyBtn");
 const propertyModal = document.getElementById("propertyModal");
@@ -307,7 +308,7 @@ function openEditCleaning(taskId) {
   cleaningStatus.value = task.status || "Scheduled";
   cleaningTechnician.value = task.technician || "";
   cleaningCharge.value = task.charge || 0;
-  cleaningNotes.value = task.notes || "";
+  cleaningNotes.value = stripManualBillingOverrideTag(task.notes || "");
 
   cleaningModal.classList.remove("hidden");
 }
@@ -621,7 +622,7 @@ function renderMessagesPreview() {
           }
 
           if (task.notes) {
-            lines.push(`  Notes: ${task.notes}`);
+            lines.push(`  Notes: ${stripManualBillingOverrideTag(task.notes)}`);
           }
         });
 
@@ -1265,6 +1266,8 @@ async function saveCleaningTask() {
   // If a task's date is being changed, flag it as manually modified
   // so that future syncs do not overwrite it or recreate it on the original date.
   const isManuallyMoving = editingCleaningId && existingTask?.service_date !== serviceDate;
+  const shouldApplyManualBillingOverride = Boolean(editingCleaningId && charge > 0);
+  const notesWithOverride = applyManualBillingOverrideTag(cleaningNotes.value.trim(), shouldApplyManualBillingOverride);
 
   const task = {
     property_id: selectedCleaningPropertyId,
@@ -1275,7 +1278,7 @@ async function saveCleaningTask() {
     status: taskStatus,
     off_cycle: charge > 0 || serviceType === "Off-Cycle",
     charge: charge,
-    notes: cleaningNotes.value.trim(),
+    notes: notesWithOverride,
     guest_ready: serviceType === "Guest Ready",
     completed_at: completedAt,
     ...(isManuallyMoving ? { manually_modified: true } : {})
@@ -1757,42 +1760,89 @@ function getGuestReadyBillingDetails(task) {
   const propertyCoverageRule = getCoverageRuleForProperty(property);
   const includedDays = getIncludedDaysForCoverageRule(standardDay, propertyCoverageRule);
   const isIncluded = Boolean(serviceDay && includedDays.has(serviceDay));
+  const rawCharge = Number(task.charge || 0);
+  const defaultCharge = Number(property?.default_off_cycle_charge ?? 65);
+
+  if (isIncluded && hasManualBillingOverride(task) && rawCharge > 0) {
+    return {
+      isIncluded: false,
+      isChargeable: true,
+      isManualOverride: true,
+      effectiveCharge: rawCharge,
+      serviceDay,
+      standardDay,
+      coverageRule: propertyCoverageRule,
+      coverageRuleLabel: getCoverageRuleLabel(propertyCoverageRule),
+      includedDaysLabel: formatIncludedDaysLabel(includedDays),
+      billingReasonLabel: "Manual Override",
+    };
+  }
 
   if (isIncluded) {
     return {
       isIncluded: true,
       isChargeable: false,
+      isManualOverride: false,
       effectiveCharge: 0,
       serviceDay,
       standardDay,
       coverageRule: propertyCoverageRule,
       coverageRuleLabel: getCoverageRuleLabel(propertyCoverageRule),
       includedDaysLabel: formatIncludedDaysLabel(includedDays),
+      billingReasonLabel: "Included",
     };
   }
-
-  const rawCharge = Number(task.charge || 0);
-  const defaultCharge = Number(property?.default_off_cycle_charge ?? 65);
 
   return {
     isIncluded: false,
     isChargeable: true,
+    isManualOverride: false,
     effectiveCharge: rawCharge > 0 ? rawCharge : defaultCharge,
     serviceDay,
     standardDay,
     coverageRule: propertyCoverageRule,
     coverageRuleLabel: getCoverageRuleLabel(propertyCoverageRule),
     includedDaysLabel: formatIncludedDaysLabel(includedDays),
+    billingReasonLabel: "Chargeable",
+  };
+}
+
+function getTaskBillingContext(task) {
+  if (!isTaskGuestReady(task)) {
+    const amount = Number(task.charge || 0);
+    return {
+      billableAmount: amount,
+      isBillable: amount > 0,
+      billingReasonLabel: amount > 0 ? "Manual Charge" : "Included",
+    };
+  }
+
+  const guestReadyBilling = getGuestReadyBillingDetails(task);
+  const amount = guestReadyBilling.isChargeable ? Number(guestReadyBilling.effectiveCharge || 0) : 0;
+  return {
+    billableAmount: amount,
+    isBillable: amount > 0,
+    billingReasonLabel: guestReadyBilling.billingReasonLabel,
+    guestReadyBilling,
   };
 }
 
 function getTaskBillingAmount(task) {
-  if (!isTaskGuestReady(task)) {
-    return Number(task.charge || 0);
-  }
+  return getTaskBillingContext(task).billableAmount;
+}
 
-  const billing = getGuestReadyBillingDetails(task);
-  return billing.isChargeable ? billing.effectiveCharge : 0;
+function hasManualBillingOverride(task) {
+  return String(task?.notes || "").includes(MANUAL_BILLING_OVERRIDE_TAG);
+}
+
+function stripManualBillingOverrideTag(notes) {
+  return String(notes || "").replace(MANUAL_BILLING_OVERRIDE_TAG, "").trim();
+}
+
+function applyManualBillingOverrideTag(notes, shouldApply) {
+  const cleanNotes = stripManualBillingOverrideTag(notes);
+  if (!shouldApply) return cleanNotes;
+  return cleanNotes ? `${MANUAL_BILLING_OVERRIDE_TAG} ${cleanNotes}` : MANUAL_BILLING_OVERRIDE_TAG;
 }
 
 function renderBillingReportHeader() {
@@ -1829,29 +1879,21 @@ function getBillingReportRows() {
   if (!startDate || !endDate) return [];
 
   const selectedPropertyId = billingPropertySelect?.value || "";
-  const reconciledOnly = billingReconciledOnly?.checked === true;
-
-  const isTaskReconciled = (task) => {
-    return task.invoiced === true || task.invoiced === 1 || task.invoiced === "true";
-  };
 
   return cleaningTasks
-    .filter((task) => isTaskGuestReady(task))
     .filter((task) => String(task.status || "").toLowerCase() === "completed")
     .filter((task) => {
       const taskDate = task.service_date || task.scheduled_date;
       return Boolean(taskDate && taskDate >= startDate && taskDate <= endDate);
     })
     .filter((task) => !selectedPropertyId || task.property_id === selectedPropertyId)
-    .filter((task) => {
-      if (!reconciledOnly) return true;
-      return isTaskReconciled(task);
-    })
+    .filter((task) => isTaskReconciled(task))
     .map((task) => {
-      const amount = getTaskBillingAmount(task);
+      const billingContext = getTaskBillingContext(task);
       return {
         ...task,
-        billableAmount: amount,
+        billableAmount: billingContext.billableAmount,
+        billingReasonLabel: billingContext.billingReasonLabel,
       };
     })
     .filter((task) => task.billableAmount > 0)
@@ -1906,10 +1948,13 @@ function renderBillingReport() {
 
     const rowsHtml = items.map((item) => {
       const dateLabel = item.service_date || item.scheduled_date || "-";
+      const serviceLabel = item.service_type || "Manual";
+      const reasonLabel = item.billingReasonLabel || "Chargeable";
       return `
         <tr>
           <td>${dateLabel}</td>
-          <td>Guest Ready Cleaning</td>
+          <td>${serviceLabel}</td>
+          <td>${reasonLabel}</td>
           <td class="billing-report-amount">$${Number(item.billableAmount).toFixed(2)}</td>
         </tr>
       `;
@@ -1923,6 +1968,7 @@ function renderBillingReport() {
             <tr>
               <th>Date</th>
               <th>Service</th>
+              <th>Billing Reason</th>
               <th>Amount</th>
             </tr>
           </thead>
@@ -1939,10 +1985,10 @@ function renderBillingReport() {
     billingReportContainer.innerHTML = `
       <div class="billing-report-sheet">
         ${renderBillingReportHeader()}
-        <h2 class="billing-report-title">Guest Ready Cleaning Report</h2>
+        <h2 class="billing-report-title">Cleaning Billing Report</h2>
         <div class="billing-report-meta">Billing Period: ${startDate} to ${endDate}</div>
         <div class="billing-report-meta">Generated: ${generatedDate}</div>
-        <div class="empty">No billable completed Guest Ready tasks found for the selected filters.</div>
+        <div class="empty">No billable completed tasks found for the selected filters.</div>
         ${renderBillingReportFooter()}
       </div>
     `;
@@ -1952,7 +1998,7 @@ function renderBillingReport() {
   billingReportContainer.innerHTML = `
     <div class="billing-report-sheet">
       ${renderBillingReportHeader()}
-      <h2 class="billing-report-title">Guest Ready Cleaning Report</h2>
+      <h2 class="billing-report-title">Cleaning Billing Report</h2>
       <div class="billing-report-meta">Billing Period: ${startDate} to ${endDate}</div>
       <div class="billing-report-meta">Generated: ${generatedDate}</div>
       ${groupMarkup}
@@ -1965,7 +2011,15 @@ function renderBillingReport() {
 function shouldShowReconcileForTask(task) {
   if (!task) return false;
   if (task.service_type === "Weekly Standard") return false;
-  return getTaskBillingAmount(task) > 0;
+  if (isTaskReconciled(task)) return false;
+  const billingContext = getTaskBillingContext(task);
+  const isChargeable = billingContext.guestReadyBilling?.isChargeable === true;
+  const hasAmount = Number(task.charge || 0) > 0 || billingContext.billableAmount > 0;
+  return isChargeable || hasAmount;
+}
+
+function isTaskReconciled(task) {
+  return task.invoiced === true || task.invoiced === 1 || task.invoiced === "true";
 }
 
 function renderTaskCard(task) {
@@ -2394,7 +2448,8 @@ function renderProperties() {
               ? `<p>No cleanings scheduled.</p>`
               : tasks.map((task) => {
                   const taskBillingAmount = getTaskBillingAmount(task);
-                  const guestReadyBilling = isTaskGuestReady(task) ? getGuestReadyBillingDetails(task) : null;
+                  const billingContext = getTaskBillingContext(task);
+                  const guestReadyBilling = billingContext.guestReadyBilling || null;
                   const showReconcile = shouldShowReconcileForTask(task);
                   const invoiceMarkerClass = task.invoiced ? "invoice-marker-checked" : "invoice-marker-unchecked";
                   const taskClass =
@@ -2416,10 +2471,14 @@ function renderProperties() {
                       : `<span class="status-badge badge-blue">SCHEDULED</span>`;
 
                   const billingLine = guestReadyBilling
-                    ? guestReadyBilling.isIncluded
+                    ? guestReadyBilling.isManualOverride
+                      ? `<div class="task-line"><small>Billing: Manual Override (entered charge; rule: ${guestReadyBilling.coverageRuleLabel}; included days: ${guestReadyBilling.includedDaysLabel})</small></div>`
+                      : guestReadyBilling.isIncluded
                       ? `<div class="task-line"><small>Billing: Included (${guestReadyBilling.serviceDay}; rule: ${guestReadyBilling.coverageRuleLabel}; included days: ${guestReadyBilling.includedDaysLabel})</small></div>`
                       : `<div class="task-line"><small>Billing: Chargeable (${guestReadyBilling.serviceDay || "Outside route window"}; rule: ${guestReadyBilling.coverageRuleLabel}; included days: ${guestReadyBilling.includedDaysLabel})</small></div>`
-                    : "";
+                    : taskBillingAmount > 0
+                      ? `<div class="task-line"><small>Billing: Manual Charge</small></div>`
+                      : "";
 
                   const sameDayBadge = isSameDayCheckInGuestReadyTask(task)
                     ? `<span class="task-alert-badge badge-alert-red">🚨 Same-Day Check-In</span>`
@@ -2443,7 +2502,7 @@ function renderProperties() {
                       <div class="task-line"><small>Status: ${task.status}</small></div>
                       ${task.completed_at ? `<div class="task-line"><small>Completed: ${new Date(task.completed_at).toLocaleString()}</small></div>` : ""}
                       ${task.check_in_date ? `<div class="task-line"><small>Prior to check-in: ${task.check_in_date}</small></div>` : ""}
-                      ${task.notes ? `<div class="task-line"><small>Notes: ${task.notes}</small></div>` : ""}
+                      ${task.notes ? `<div class="task-line"><small>Notes: ${stripManualBillingOverrideTag(task.notes)}</small></div>` : ""}
                       <div class="task-buttons">
                         <button onclick="openEditCleaning('${task.id}')">Edit</button>
                         ${task.status !== "Completed" ? `<button onclick="markCleaningComplete('${task.id}')">Complete</button>` : ""}
