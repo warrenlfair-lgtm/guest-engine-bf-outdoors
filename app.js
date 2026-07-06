@@ -90,6 +90,8 @@ const billingReportContainer = document.getElementById("billingReportContainer")
 const messageWeekDate = document.getElementById("messageWeekDate");
 const messageUnassignedName = document.getElementById("messageUnassignedName");
 const messagesByTech = document.getElementById("messagesByTech");
+const messagesBranding = document.getElementById("messagesBranding");
+const companyHeaderLogo = document.getElementById("companyHeaderLogo");
 const companyHeaderName = document.getElementById("companyHeaderName");
 const companyHeaderTagline = document.getElementById("companyHeaderTagline");
 const companyNameInput = document.getElementById("companyNameInput");
@@ -97,10 +99,17 @@ const companyTaglineInput = document.getElementById("companyTaglineInput");
 const companyPhoneInput = document.getElementById("companyPhoneInput");
 const companyEmailInput = document.getElementById("companyEmailInput");
 const companyLogoUrlInput = document.getElementById("companyLogoUrlInput");
+const companyLogoFileInput = document.getElementById("companyLogoFileInput");
+const uploadCompanyLogoBtn = document.getElementById("uploadCompanyLogoBtn");
+const companyLogoPreview = document.getElementById("companyLogoPreview");
+const companyLogoPreviewEmpty = document.getElementById("companyLogoPreviewEmpty");
 const adminPinInput = document.getElementById("adminPinInput");
 const confirmAdminPinInput = document.getElementById("confirmAdminPinInput");
 const saveCompanyProfileBtn = document.getElementById("saveCompanyProfileBtn");
 const settingsStatus = document.getElementById("settingsStatus");
+const companyLogoUploadFeature = document.getElementById("companyLogoUploadFeature");
+
+const COMPANY_LOGO_BUCKET = "company-logos";
 
 addPropertyBtn.onclick = openAddModal;
 cancelBtn.onclick = closePropertyModal;
@@ -191,6 +200,16 @@ if (messageUnassignedName) {
 
 if (saveCompanyProfileBtn) {
   saveCompanyProfileBtn.addEventListener("click", saveCompanyProfile);
+}
+
+if (companyLogoUrlInput) {
+  companyLogoUrlInput.addEventListener("input", () => {
+    renderCompanyLogoPreview(companyLogoUrlInput.value);
+  });
+}
+
+if (uploadCompanyLogoBtn) {
+  uploadCompanyLogoBtn.addEventListener("click", uploadCompanyLogo);
 }
 
 initializeWeekViewMode();
@@ -478,6 +497,7 @@ async function loadData() {
   statusMessage.textContent = "Loading...";
 
   await loadCompanyProfile();
+  await initializeCompanyLogoUploadSupport();
   await loadProperties();
   await loadCleaningTasks();
   await loadReservations();
@@ -822,6 +842,8 @@ function applyCompanyProfileToApp() {
   if (companyHeaderTagline) {
     companyHeaderTagline.textContent = companyProfile.tagline;
   }
+  applyImageSource(companyHeaderLogo, companyProfile.logo_url);
+  renderMessagesBranding();
   document.title = `${companyProfile.company_name} - Guest Ready Engine`;
 }
 
@@ -832,8 +854,224 @@ function renderCompanyProfileSettings() {
   companyPhoneInput.value = companyProfile.phone_number || "";
   companyEmailInput.value = companyProfile.email || "";
   companyLogoUrlInput.value = companyProfile.logo_url || "";
+  renderCompanyLogoPreview(companyProfile.logo_url);
   if (adminPinInput) adminPinInput.value = "";
   if (confirmAdminPinInput) confirmAdminPinInput.value = "";
+}
+
+function applyImageSource(imageElement, sourceUrl) {
+  if (!imageElement) return;
+  const normalizedUrl = String(sourceUrl || "").trim();
+  if (!normalizedUrl) {
+    imageElement.removeAttribute("src");
+    imageElement.classList.add("hidden");
+    return;
+  }
+
+  imageElement.src = normalizedUrl;
+  imageElement.classList.remove("hidden");
+  imageElement.onerror = () => {
+    imageElement.classList.add("hidden");
+  };
+}
+
+function renderCompanyLogoPreview(sourceUrl) {
+  if (!companyLogoPreview) return;
+  const normalizedUrl = String(sourceUrl || "").trim();
+  if (!normalizedUrl) {
+    companyLogoPreview.removeAttribute("src");
+    companyLogoPreview.classList.add("hidden");
+    if (companyLogoPreviewEmpty) {
+      companyLogoPreviewEmpty.classList.remove("hidden");
+    }
+    return;
+  }
+
+  companyLogoPreview.src = normalizedUrl;
+  companyLogoPreview.classList.remove("hidden");
+  companyLogoPreview.onload = () => {
+    if (companyLogoPreviewEmpty) {
+      companyLogoPreviewEmpty.classList.add("hidden");
+    }
+  };
+  companyLogoPreview.onerror = () => {
+    companyLogoPreview.classList.add("hidden");
+    if (companyLogoPreviewEmpty) {
+      companyLogoPreviewEmpty.classList.remove("hidden");
+    }
+  };
+
+  if (!companyLogoPreviewEmpty) return;
+  companyLogoPreviewEmpty.classList.add("hidden");
+}
+
+function renderMessagesBranding() {
+  if (!messagesBranding) return;
+  const logoMarkup = companyProfile.logo_url
+    ? `<img src="${companyProfile.logo_url}" alt="${companyProfile.company_name} logo" class="company-logo messages-branding-logo" onerror="this.style.display='none'">`
+    : "";
+
+  messagesBranding.innerHTML = `
+    ${logoMarkup}
+    <div>
+      <div class="messages-branding-name">${companyProfile.company_name}</div>
+      <div class="messages-branding-tagline">${companyProfile.tagline}</div>
+    </div>
+  `;
+  messagesBranding.classList.remove("hidden");
+}
+
+async function uploadCompanyLogo() {
+  if (companyLogoUploadFeature?.classList.contains("hidden")) {
+    alert("Logo upload is unavailable. Use Logo URL instead.");
+    return;
+  }
+
+  const file = companyLogoFileInput?.files?.[0];
+  if (!file) {
+    alert("Choose an image file first.");
+    return;
+  }
+
+  if (settingsStatus) {
+    settingsStatus.textContent = "Uploading logo...";
+  }
+
+  const fileExtension = (file.name.split(".").pop() || "png").toLowerCase();
+  const safeExtension = fileExtension.replace(/[^a-z0-9]/g, "") || "png";
+  const storageReady = await ensureCompanyLogoBucketReady();
+  if (!storageReady) {
+    if (companyLogoUploadFeature) {
+      companyLogoUploadFeature.classList.add("hidden");
+    }
+    if (settingsStatus) {
+      settingsStatus.textContent = "Upload unavailable. Use Logo URL instead.";
+    }
+    return;
+  }
+
+  const uploadPath = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${safeExtension}`;
+  const { error: uploadError } = await supabaseClient.storage
+    .from(COMPANY_LOGO_BUCKET)
+    .upload(uploadPath, file, { upsert: true, cacheControl: "3600" });
+
+  if (uploadError) {
+    if (settingsStatus) {
+      settingsStatus.textContent = "Upload unavailable. Use Logo URL instead.";
+    }
+    console.warn("Logo upload failed:", uploadError.message);
+    return;
+  }
+
+  const { data: publicUrlData } = supabaseClient.storage
+    .from(COMPANY_LOGO_BUCKET)
+    .getPublicUrl(uploadPath);
+
+  const uploadedUrl = publicUrlData?.publicUrl || "";
+  if (!uploadedUrl) {
+    if (settingsStatus) {
+      settingsStatus.textContent = "Upload unavailable. Use Logo URL instead.";
+    }
+    console.warn("Logo upload failed: could not derive public URL.");
+    return;
+  }
+
+  const saved = await persistCompanyLogoUrl(uploadedUrl);
+  if (!saved) {
+    if (settingsStatus) {
+      settingsStatus.textContent = "Logo uploaded, but profile save failed.";
+    }
+    return;
+  }
+
+  if (companyLogoUrlInput) {
+    companyLogoUrlInput.value = uploadedUrl;
+  }
+  companyProfile = getNormalizedCompanyProfile({
+    ...companyProfile,
+    logo_url: uploadedUrl,
+  });
+  applyCompanyProfileToApp();
+  renderCompanyProfileSettings();
+  renderBillingReport();
+
+  if (settingsStatus) {
+    settingsStatus.textContent = "Logo uploaded and saved.";
+    setTimeout(() => {
+      settingsStatus.textContent = "";
+    }, 2500);
+  }
+}
+
+async function persistCompanyLogoUrl(logoUrl) {
+  const payload = getNormalizedCompanyProfile({
+    ...companyProfile,
+    logo_url: logoUrl,
+  });
+
+  const upsertPayload = {
+    id: 1,
+    ...payload,
+    updated_at: new Date().toISOString(),
+  };
+
+  const { error } = await supabaseClient
+    .from("company_profile")
+    .upsert(upsertPayload, { onConflict: "id" });
+
+  if (error) {
+    console.warn("Could not persist uploaded logo URL:", error.message);
+    return false;
+  }
+
+  return true;
+}
+
+async function initializeCompanyLogoUploadSupport() {
+  if (!companyLogoUploadFeature) return;
+  const storageReady = await ensureCompanyLogoBucketReady();
+  companyLogoUploadFeature.classList.toggle("hidden", !storageReady);
+  if (!storageReady && companyLogoFileInput) {
+    companyLogoFileInput.value = "";
+  }
+}
+
+async function ensureCompanyLogoBucketReady() {
+  const { error: listError } = await supabaseClient.storage
+    .from(COMPANY_LOGO_BUCKET)
+    .list("", { limit: 1 });
+
+  if (!listError) {
+    return true;
+  }
+
+  const listMessage = String(listError.message || "").toLowerCase();
+  const bucketMissing = listMessage.includes("not found")
+    || listMessage.includes("does not exist")
+    || listMessage.includes("bucket");
+
+  if (!bucketMissing) {
+    console.warn("Company logo storage is unavailable:", listError.message);
+    return false;
+  }
+
+  const { error: createError } = await supabaseClient.storage.createBucket(COMPANY_LOGO_BUCKET, {
+    public: true,
+    fileSizeLimit: "5MB",
+    allowedMimeTypes: ["image/png", "image/jpeg", "image/webp", "image/gif", "image/svg+xml"],
+  });
+
+  if (createError) {
+    const createMessage = String(createError.message || "").toLowerCase();
+    const alreadyExists = createMessage.includes("already exists") || createMessage.includes("duplicate");
+    if (alreadyExists) {
+      return true;
+    }
+    console.warn("Could not create company-logos bucket:", createError.message);
+    return false;
+  }
+
+  return true;
 }
 
 async function loadCompanyProfile() {
@@ -1847,7 +2085,7 @@ function applyManualBillingOverrideTag(notes, shouldApply) {
 
 function renderBillingReportHeader() {
   const logoMarkup = companyProfile.logo_url
-    ? `<img src="${companyProfile.logo_url}" alt="${companyProfile.company_name} logo" class="billing-report-logo" onerror="this.style.display='none'">`
+    ? `<img src="${companyProfile.logo_url}" alt="${companyProfile.company_name} logo" class="company-logo billing-report-logo" onerror="this.style.display='none'">`
     : "";
 
   return `

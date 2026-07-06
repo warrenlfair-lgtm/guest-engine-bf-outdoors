@@ -18,6 +18,30 @@ body {
     margin-bottom: 25px;
 }
 
+.company-header-branding {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.company-logo {
+    --company-logo-max-width: 220px;
+    --company-logo-max-height: 110px;
+    max-width: var(--company-logo-max-width);
+    max-height: var(--company-logo-max-height);
+    width: auto;
+    height: auto;
+    object-fit: contain;
+    display: block;
+}
+
+.company-header-logo {
+    border-radius: 10px;
+    background: white;
+    border: 1px solid #dbe2ea;
+    box-shadow: 0 2px 6px rgba(0,0,0,.08);
+}
+
 h1 {
     color: #0066cc;
     margin-bottom: 4px;
@@ -1346,9 +1370,6 @@ textarea{
 }
 
 .billing-report-logo {
-    width: 56px;
-    height: 56px;
-    object-fit: contain;
     border-radius: 8px;
 }
 
@@ -1451,11 +1472,77 @@ textarea{
     font-weight: 600;
 }
 
+.company-logo-preview-wrap {
+    margin-top: 10px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.company-logo-upload-row {
+    margin-top: 10px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.company-logo-upload-row label {
+    margin: 0;
+    min-width: 120px;
+}
+
+.company-logo-upload-row input[type="file"] {
+    max-width: 280px;
+}
+
+.company-logo-preview {
+    --company-logo-max-width: 280px;
+    --company-logo-max-height: 140px;
+    border-radius: 10px;
+    border: 1px solid #dbe2ea;
+    background: #f8fafc;
+    padding: 6px;
+}
+
+.company-logo-preview-empty {
+    font-size: 13px;
+    color: #64748b;
+}
+
 .messages-card {
     background: white;
     border-radius: 12px;
     padding: 20px;
     box-shadow: 0 3px 10px rgba(0,0,0,.08);
+}
+
+.messages-branding {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: white;
+    border-radius: 12px;
+    padding: 14px 16px;
+    box-shadow: 0 3px 10px rgba(0,0,0,.08);
+    margin-bottom: 12px;
+}
+
+.messages-branding-logo {
+    border-radius: 8px;
+    border: 1px solid #dbe2ea;
+    background: #f8fafc;
+}
+
+.messages-branding-name {
+    font-size: 17px;
+    font-weight: 700;
+    color: #0f172a;
+}
+
+.messages-branding-tagline {
+    font-size: 13px;
+    color: #64748b;
 }
 
 .messages-controls {

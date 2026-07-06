@@ -10,9 +10,12 @@
 
 <div class="container">
   <div class="header">
-    <div>
+    <div class="company-header-branding">
+      <img id="companyHeaderLogo" class="company-logo company-header-logo hidden" alt="Company logo">
+      <div>
       <h1 id="companyHeaderName">Guest Ready Pool Pros</h1>
       <p id="companyHeaderTagline">Vacation Rental Pool Service Specialists</p>
+      </div>
     </div>
 
     <button id="addPropertyBtn">+ Add Property</button>
@@ -143,6 +146,8 @@
       <p>Generate a weekly message for your assigned tech.</p>
     </div>
 
+    <div id="messagesBranding" class="messages-branding hidden"></div>
+
     <div class="messages-card">
       <div class="messages-controls">
         <div class="filter-group">
@@ -180,6 +185,17 @@
 
       <label for="companyLogoUrlInput">Logo URL</label>
       <input id="companyLogoUrlInput" type="url" placeholder="https://example.com/logo.png">
+
+      <div id="companyLogoUploadFeature" class="company-logo-upload-row">
+        <label for="companyLogoFileInput">Or Upload Logo</label>
+        <input id="companyLogoFileInput" type="file" accept="image/*">
+        <button type="button" id="uploadCompanyLogoBtn">Upload Logo</button>
+      </div>
+
+      <div class="company-logo-preview-wrap">
+        <img id="companyLogoPreview" class="company-logo company-logo-preview hidden" alt="Company logo preview">
+        <div id="companyLogoPreviewEmpty" class="company-logo-preview-empty">No logo configured.</div>
+      </div>
 
       <h3>Security Settings</h3>
 
