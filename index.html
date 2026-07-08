@@ -47,9 +47,7 @@
     <button type="button" class="view-btn active" data-view="today">Today View</button>
     <button type="button" class="view-btn" data-view="week">Week View</button>
     <button type="button" class="view-btn" data-view="properties">Properties</button>
-    <button type="button" class="view-btn" data-view="billing">Billing Report</button>
-    <button type="button" class="view-btn" data-view="routeFragmentation">Route Fragmentation</button>
-    <button type="button" class="view-btn" data-view="messages">Messages</button>
+    <button type="button" class="view-btn" data-view="reports">Reports</button>
     <button type="button" class="view-btn" data-view="settings">Settings</button>
   </div>
 
@@ -118,7 +116,10 @@
         <h2>Billing Report</h2>
         <p>Printable report of billable completed Guest Ready cleanings.</p>
       </div>
-      <button type="button" id="billingPrintBtn" class="print-btn">Print / Save as PDF</button>
+      <div class="billing-header-actions">
+        <button type="button" onclick="navigateToView('reports')">Back to Reports</button>
+        <button type="button" id="billingPrintBtn" class="print-btn">Print / Save as PDF</button>
+      </div>
     </div>
 
     <div class="billing-filters" id="billingFilterPanel">
@@ -145,6 +146,7 @@
     <div class="view-header">
       <h2>Route Fragmentation</h2>
       <p>Measure additional route days and revenue recovery by client/property group.</p>
+      <button type="button" onclick="navigateToView('reports')">Back to Reports</button>
     </div>
 
     <div class="route-fragmentation-filters">
@@ -166,6 +168,75 @@
     </div>
 
     <div id="routeFragContainer"></div>
+  </section>
+
+  <section id="reportsView" class="view-panel">
+    <div class="view-header">
+      <div>
+        <h2>Reports</h2>
+        <p>Open report tools from one place. Future reports can be added here.</p>
+      </div>
+    </div>
+
+    <div id="reportsDashboardCards" class="reports-dashboard-cards">
+      <article class="report-dashboard-card">
+        <h3>Billing Report</h3>
+        <p>View completed services, billing totals, reconciliation status, and monthly revenue.</p>
+        <button type="button" onclick="openReportFromDashboard('billing')">Open Report</button>
+      </article>
+
+      <article class="report-dashboard-card">
+        <h3>Route Fragmentation Report</h3>
+        <p>Analyze scheduling inefficiencies and identify unnecessary technician travel.</p>
+        <button type="button" onclick="openReportFromDashboard('routeFragmentation')">Open Report</button>
+      </article>
+
+      <article class="report-dashboard-card">
+        <h3>Chemical Usage Report</h3>
+        <p>View chemical usage by property, date range, and chemical type. Export to PDF or print.</p>
+        <button type="button" onclick="openReportFromDashboard('chemical')">Open Report</button>
+      </article>
+    </div>
+
+    <div id="chemicalReportWorkspace" class="hidden">
+      <div class="view-header chemical-report-header-row">
+        <div>
+          <h3>Chemical Usage Report</h3>
+          <p>Generate printable and shareable chemical usage reports.</p>
+        </div>
+        <div class="chemical-report-actions" id="chemicalReportActions">
+          <button type="button" onclick="showChemicalReportWorkspace(false)">Back to Reports</button>
+          <button type="button" id="chemicalReportPrintBtn" class="print-btn">Print Report</button>
+          <button type="button" id="chemicalReportPdfBtn" class="print-btn">Download PDF</button>
+          <button type="button" id="chemicalReportShareBtn">Share Report</button>
+        </div>
+      </div>
+
+      <div class="billing-filters" id="chemicalReportFilterPanel">
+        <div class="filter-group">
+          <label for="chemicalReportStartDate">Start Date:</label>
+          <input id="chemicalReportStartDate" type="date">
+        </div>
+        <div class="filter-group">
+          <label for="chemicalReportEndDate">End Date:</label>
+          <input id="chemicalReportEndDate" type="date">
+        </div>
+        <div class="filter-group">
+          <label for="chemicalReportPropertySelect">Property:</label>
+          <select id="chemicalReportPropertySelect">
+            <option value="">All Properties</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label for="chemicalReportTypeSelect">Chemical:</label>
+          <select id="chemicalReportTypeSelect">
+            <option value="">All Chemicals</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="chemicalReportContainer" class="billing-report-paper"></div>
+    </div>
   </section>
 
   <section id="messagesView" class="view-panel">
@@ -319,6 +390,18 @@
     <label>Notes</label>
     <textarea id="cleaningNotes" rows="3"></textarea>
 
+    <div class="chemical-usage-section">
+      <div class="chemical-usage-header-row">
+        <div>
+          <h3>Chemical Usage</h3>
+          <p>Track chemicals used during this service visit.</p>
+        </div>
+        <button type="button" id="addChemicalBtn">+ Add Chemical</button>
+      </div>
+      <div id="chemicalUsageTaskHint" class="chemical-usage-hint hidden"></div>
+      <div id="chemicalUsageList" class="chemical-usage-list"></div>
+    </div>
+
     <div class="modal-actions">
       <button id="cancelCleaningBtn">Cancel</button>
       <button id="saveCleaningBtn">Save Cleaning</button>
@@ -374,6 +457,29 @@
     <div class="modal-actions">
       <button id="pinCancelBtn" type="button">Cancel</button>
       <button id="pinUnlockBtn" type="button">Unlock</button>
+    </div>
+  </div>
+</div>
+
+<div id="chemicalUsageModal" class="modal hidden">
+  <div class="modal-card chemical-modal-card">
+    <h2>Add Chemical Usage</h2>
+
+    <label for="chemicalNameSelect">Chemical Name</label>
+    <select id="chemicalNameSelect"></select>
+
+    <label for="chemicalQuantityInput">Quantity Used</label>
+    <input id="chemicalQuantityInput" type="number" inputmode="decimal" step="0.01" min="0" placeholder="e.g., 2.5">
+
+    <label for="chemicalUnitSelect">Unit</label>
+    <select id="chemicalUnitSelect"></select>
+
+    <label for="chemicalNotesInput">Notes (Optional)</label>
+    <textarea id="chemicalNotesInput" rows="3" placeholder="Optional details"></textarea>
+
+    <div class="modal-actions">
+      <button id="cancelChemicalBtn" type="button">Cancel</button>
+      <button id="saveChemicalBtn" type="button">Save Chemical</button>
     </div>
   </div>
 </div>

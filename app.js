@@ -2,6 +2,7 @@ let properties = [];
 let cleaningTasks = [];
 let reservations = [];
 let operationsReminders = [];
+let chemicalUsageEntries = [];
 
 const DEFAULT_COMPANY_PROFILE = {
   company_name: "Guest Ready Pool Pros",
@@ -19,15 +20,41 @@ let selectedCleaningPropertyId = null;
 let editingCleaningId = null;
 let editingReminderPropertyId = null;
 let editingReminderId = null;
+let editingChemicalUsageId = null;
 
 let selectedPropertyFilter = "";
 let selectedMonthFilter = "current";
 let collapsedPropertyCards = new Set();
+let propertyDetailTabState = new Map();
+let propertyChemicalFilterState = new Map();
+let latestChemicalReportState = {
+  startDate: "",
+  endDate: "",
+  selectedPropertyId: "",
+  selectedChemical: "",
+  rows: [],
+};
 let weekViewMode = localStorage.getItem("guestReadyDefaultWeekView") || "calendar";
-const PROTECTED_VIEWS = new Set(["billing", "messages"]);
+const PROTECTED_VIEWS = new Set(["reports"]);
 let isProtectedAccessUnlocked = false;
 let pinModalResolver = null;
 const MANUAL_BILLING_OVERRIDE_TAG = "[Manual Override]";
+const CHEMICAL_NAME_OPTIONS = [
+  "Liquid Chlorine",
+  "Chlorine Tablets",
+  "pH Up",
+  "pH Down",
+  "Alkalinity Up",
+  "Alkalinity Down",
+  "Stabilizer / CYA",
+  "Calcium Hardness Increaser",
+  "Algaecide",
+  "Clarifier",
+  "Phosphate Remover",
+  "Salt",
+  "Other",
+];
+const CHEMICAL_UNIT_OPTIONS = ["gallons", "pounds", "ounces", "tablets", "bags", "quarts"];
 
 const addPropertyBtn = document.getElementById("addPropertyBtn");
 const propertyModal = document.getElementById("propertyModal");
@@ -55,6 +82,16 @@ const cleaningStatus = document.getElementById("cleaningStatus");
 const cleaningTechnician = document.getElementById("cleaningTechnician");
 const cleaningCharge = document.getElementById("cleaningCharge");
 const cleaningNotes = document.getElementById("cleaningNotes");
+const addChemicalBtn = document.getElementById("addChemicalBtn");
+const chemicalUsageTaskHint = document.getElementById("chemicalUsageTaskHint");
+const chemicalUsageList = document.getElementById("chemicalUsageList");
+const chemicalUsageModal = document.getElementById("chemicalUsageModal");
+const chemicalNameSelect = document.getElementById("chemicalNameSelect");
+const chemicalQuantityInput = document.getElementById("chemicalQuantityInput");
+const chemicalUnitSelect = document.getElementById("chemicalUnitSelect");
+const chemicalNotesInput = document.getElementById("chemicalNotesInput");
+const cancelChemicalBtn = document.getElementById("cancelChemicalBtn");
+const saveChemicalBtn = document.getElementById("saveChemicalBtn");
 const viewButtons = Array.from(document.querySelectorAll(".view-btn"));
 const todayTasksContainer = document.getElementById("todayTasks");
 const guestProtectionAlertsContainer = document.getElementById("guestProtectionAlerts");
@@ -93,6 +130,14 @@ const routeFragEndDate = document.getElementById("routeFragEndDate");
 const routeFragClientSelect = document.getElementById("routeFragClientSelect");
 const routeFragRunBtn = document.getElementById("routeFragRunBtn");
 const routeFragContainer = document.getElementById("routeFragContainer");
+const chemicalReportStartDate = document.getElementById("chemicalReportStartDate");
+const chemicalReportEndDate = document.getElementById("chemicalReportEndDate");
+const chemicalReportPropertySelect = document.getElementById("chemicalReportPropertySelect");
+const chemicalReportTypeSelect = document.getElementById("chemicalReportTypeSelect");
+const chemicalReportContainer = document.getElementById("chemicalReportContainer");
+const chemicalReportPrintBtn = document.getElementById("chemicalReportPrintBtn");
+const chemicalReportPdfBtn = document.getElementById("chemicalReportPdfBtn");
+const chemicalReportShareBtn = document.getElementById("chemicalReportShareBtn");
 const messageWeekDate = document.getElementById("messageWeekDate");
 const messageUnassignedName = document.getElementById("messageUnassignedName");
 const messagesByTech = document.getElementById("messagesByTech");
@@ -123,6 +168,22 @@ savePropertyBtn.onclick = saveProperty;
 
 cancelCleaningBtn.onclick = closeCleaningModal;
 saveCleaningBtn.onclick = saveCleaningTask;
+
+if (addChemicalBtn) {
+  addChemicalBtn.addEventListener("click", () => openChemicalUsageModal());
+}
+
+if (cancelChemicalBtn) {
+  cancelChemicalBtn.addEventListener("click", closeChemicalUsageModal);
+}
+
+if (saveChemicalBtn) {
+  saveChemicalBtn.addEventListener("click", saveChemicalUsageEntry);
+}
+
+if (cleaningStatus) {
+  cleaningStatus.addEventListener("change", renderChemicalUsageForCurrentTask);
+}
 
 cancelReminderBtn.onclick = closeReminderModal;
 saveReminderBtn.onclick = saveReminder;
@@ -177,7 +238,7 @@ if (billingRunBtn) {
 }
 
 if (billingPrintBtn) {
-  billingPrintBtn.addEventListener("click", () => window.print());
+  billingPrintBtn.addEventListener("click", printBillingReport);
 }
 
 if (billingStartDate) {
@@ -212,6 +273,34 @@ if (routeFragClientSelect) {
   routeFragClientSelect.addEventListener("change", renderRouteFragmentationAnalytics);
 }
 
+if (chemicalReportStartDate) {
+  chemicalReportStartDate.addEventListener("change", renderChemicalUsageReport);
+}
+
+if (chemicalReportEndDate) {
+  chemicalReportEndDate.addEventListener("change", renderChemicalUsageReport);
+}
+
+if (chemicalReportPropertySelect) {
+  chemicalReportPropertySelect.addEventListener("change", renderChemicalUsageReport);
+}
+
+if (chemicalReportTypeSelect) {
+  chemicalReportTypeSelect.addEventListener("change", renderChemicalUsageReport);
+}
+
+if (chemicalReportPrintBtn) {
+  chemicalReportPrintBtn.addEventListener("click", printChemicalUsageReport);
+}
+
+if (chemicalReportPdfBtn) {
+  chemicalReportPdfBtn.addEventListener("click", downloadChemicalUsagePdf);
+}
+
+if (chemicalReportShareBtn) {
+  chemicalReportShareBtn.addEventListener("click", shareChemicalUsageReport);
+}
+
 if (messageWeekDate) {
   messageWeekDate.addEventListener("change", renderMessagesPreview);
 }
@@ -237,7 +326,9 @@ if (uploadCompanyLogoBtn) {
 initializeWeekViewMode();
 initializeBillingReportFilters();
 initializeRouteFragmentationFilters();
+initializeChemicalReportFilters();
 initializeMessagesDefaults();
+initializeChemicalUsageOptions();
 loadData();
 
 function initializeWeekViewMode() {
@@ -269,6 +360,10 @@ function showView(viewName) {
     renderRouteFragmentationAnalytics();
   }
 
+  if (viewName === "reports") {
+    showChemicalReportWorkspace(false);
+  }
+
   if (viewName === "messages") {
     renderMessagesPreview();
   }
@@ -279,6 +374,133 @@ function initializeMessagesDefaults() {
   if (!messageWeekDate.value) {
     messageWeekDate.value = formatDateValue(new Date());
   }
+}
+
+function initializeChemicalUsageOptions() {
+  if (chemicalNameSelect) {
+    chemicalNameSelect.innerHTML = CHEMICAL_NAME_OPTIONS
+      .map((name) => `<option value="${name}">${name}</option>`)
+      .join("");
+  }
+
+  if (chemicalUnitSelect) {
+    chemicalUnitSelect.innerHTML = CHEMICAL_UNIT_OPTIONS
+      .map((unit) => `<option value="${unit}">${unit}</option>`)
+      .join("");
+  }
+}
+
+function getCurrentCleaningTask() {
+  if (!editingCleaningId) return null;
+  return cleaningTasks.find((task) => task.id === editingCleaningId) || null;
+}
+
+function canEditChemicalEntries() {
+  return Boolean(editingCleaningId);
+}
+
+function clearChemicalUsageForm() {
+  editingChemicalUsageId = null;
+  if (chemicalNameSelect) {
+    chemicalNameSelect.value = CHEMICAL_NAME_OPTIONS[0];
+  }
+  if (chemicalQuantityInput) {
+    chemicalQuantityInput.value = "";
+  }
+  if (chemicalUnitSelect) {
+    chemicalUnitSelect.value = CHEMICAL_UNIT_OPTIONS[0];
+  }
+  if (chemicalNotesInput) {
+    chemicalNotesInput.value = "";
+  }
+}
+
+function closeChemicalUsageModal() {
+  if (chemicalUsageModal) {
+    chemicalUsageModal.classList.add("hidden");
+  }
+  clearChemicalUsageForm();
+}
+
+function openChemicalUsageModal(entryId = null) {
+  if (!editingCleaningId) {
+    renderChemicalUsageForCurrentTask();
+    return;
+  }
+
+  clearChemicalUsageForm();
+
+  if (entryId) {
+    const existingEntry = chemicalUsageEntries.find((entry) => entry.id === entryId && entry.task_id === editingCleaningId);
+    if (!existingEntry) return;
+
+    editingChemicalUsageId = existingEntry.id;
+    if (chemicalNameSelect) {
+      chemicalNameSelect.value = existingEntry.chemical_name || CHEMICAL_NAME_OPTIONS[0];
+    }
+    if (chemicalQuantityInput) {
+      chemicalQuantityInput.value = existingEntry.quantity ?? "";
+    }
+    if (chemicalUnitSelect) {
+      chemicalUnitSelect.value = existingEntry.unit || CHEMICAL_UNIT_OPTIONS[0];
+    }
+    if (chemicalNotesInput) {
+      chemicalNotesInput.value = existingEntry.notes || "";
+    }
+  }
+
+  if (chemicalUsageModal) {
+    chemicalUsageModal.classList.remove("hidden");
+  }
+}
+
+function renderChemicalUsageForCurrentTask() {
+  if (!chemicalUsageList || !chemicalUsageTaskHint || !addChemicalBtn) return;
+
+  if (!editingCleaningId) {
+    addChemicalBtn.disabled = true;
+    chemicalUsageTaskHint.classList.remove("hidden");
+    chemicalUsageTaskHint.textContent = "Save this cleaning first, then add chemical usage entries.";
+    chemicalUsageList.innerHTML = "<div class=\"chemical-usage-empty\">No chemical usage entries yet.</div>";
+    return;
+  }
+
+  const editable = canEditChemicalEntries();
+  addChemicalBtn.disabled = !editable;
+  chemicalUsageTaskHint.classList.remove("hidden");
+  chemicalUsageTaskHint.textContent = editable
+    ? "Chemical usage is linked to this task and saved instantly."
+    : "Save this cleaning first, then add chemical usage entries.";
+
+  const rows = chemicalUsageEntries
+    .filter((entry) => entry.task_id === editingCleaningId)
+    .sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")));
+
+  if (!rows.length) {
+    chemicalUsageList.innerHTML = "<div class=\"chemical-usage-empty\">No chemical usage entries yet.</div>";
+    return;
+  }
+
+  chemicalUsageList.innerHTML = rows.map((entry) => {
+    const quantityLabel = Number(entry.quantity || 0).toFixed(2).replace(/\.00$/, "");
+    const createdLabel = entry.created_at ? new Date(entry.created_at).toLocaleString() : "";
+    return `
+      <div class="chemical-usage-item">
+        <div class="chemical-usage-item-head">
+          <strong>${entry.chemical_name}</strong>
+          <span>${quantityLabel} ${entry.unit || ""}</span>
+        </div>
+        ${entry.notes ? `<div class="chemical-usage-item-notes">${entry.notes}</div>` : ""}
+        ${createdLabel ? `<div class="chemical-usage-item-meta">Added: ${createdLabel}</div>` : ""}
+        ${editable ? `
+          <div class="chemical-usage-item-actions">
+            <button type="button" onclick="openChemicalUsageModal('${entry.id}')">Edit</button>
+            <button type="button" class="delete-btn" onclick="deleteChemicalUsageEntry('${entry.id}')">Delete</button>
+          </div>
+        ` : ""}
+      </div>
+    `;
+  }).join("");
 }
 
 function initializeBillingReportFilters() {
@@ -305,6 +527,39 @@ function initializeRouteFragmentationFilters() {
 
   routeFragStartDate.value = formatDateValue(monthStart);
   routeFragEndDate.value = formatDateValue(monthEnd);
+}
+
+function initializeChemicalReportFilters() {
+  if (!chemicalReportStartDate || !chemicalReportEndDate) return;
+
+  const today = new Date();
+  const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+  const monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+
+  chemicalReportStartDate.value = formatDateValue(monthStart);
+  chemicalReportEndDate.value = formatDateValue(monthEnd);
+}
+
+function runPrintForView(viewClassName) {
+  const body = document.body;
+  body.classList.remove("print-view-billing", "print-view-chemical");
+  body.classList.add(viewClassName);
+  window.print();
+  setTimeout(() => {
+    body.classList.remove("print-view-billing", "print-view-chemical");
+  }, 250);
+}
+
+function printBillingReport() {
+  runPrintForView("print-view-billing");
+}
+
+function printChemicalUsageReport() {
+  runPrintForView("print-view-chemical");
+}
+
+function downloadChemicalUsagePdf() {
+  runPrintForView("print-view-chemical");
 }
 
 function openAddModal() {
@@ -350,6 +605,8 @@ function openCleaningModal(propertyId) {
   cleaningTechnician.value = "";
   cleaningCharge.value = 0;
   cleaningNotes.value = "";
+  clearChemicalUsageForm();
+  renderChemicalUsageForCurrentTask();
 
   cleaningModal.classList.remove("hidden");
 }
@@ -367,12 +624,17 @@ function openEditCleaning(taskId) {
   cleaningTechnician.value = task.technician || "";
   cleaningCharge.value = task.charge || 0;
   cleaningNotes.value = stripManualBillingOverrideTag(task.notes || "");
+  clearChemicalUsageForm();
+  renderChemicalUsageForCurrentTask();
 
   cleaningModal.classList.remove("hidden");
 }
 
 function closeCleaningModal() {
   cleaningModal.classList.add("hidden");
+  closeChemicalUsageModal();
+  editingCleaningId = null;
+  renderChemicalUsageForCurrentTask();
 }
 
 function openAlertDetail(propertyName, turnoverDate, checkOutDate, checkInDate) {
@@ -541,6 +803,7 @@ async function loadData() {
   await loadCleaningTasks();
   await loadReservations();
   await loadOperationsReminders();
+  await loadChemicalUsageEntries();
   const monthForAutoGeneration = ["current", "next", "previous"].includes(selectedMonthFilter)
     ? selectedMonthFilter
     : "current";
@@ -555,6 +818,9 @@ async function loadData() {
   renderOperationsRemindersWidget();
   renderBillingReport();
   renderRouteFragmentationAnalytics();
+  if (!document.getElementById("chemicalReportWorkspace")?.classList.contains("hidden")) {
+    renderChemicalUsageReport();
+  }
   renderMessagesPreview();
 }
 
@@ -565,6 +831,114 @@ function getMondayStartForDate(dateString) {
   const monday = new Date(selected);
   monday.setUTCDate(selected.getUTCDate() - mondayOffset);
   return monday;
+}
+
+async function loadChemicalUsageEntries() {
+  const { data, error } = await supabaseClient
+    .from("chemical_usage")
+    .select("*")
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.warn("Could not load chemical usage entries:", error.message);
+    chemicalUsageEntries = [];
+    return;
+  }
+
+  chemicalUsageEntries = data || [];
+}
+
+async function saveChemicalUsageEntry() {
+  if (!editingCleaningId) {
+    alert("Save this cleaning first, then add chemical usage.");
+    return;
+  }
+
+  if (!canEditChemicalEntries()) {
+    alert("Save this cleaning first, then add chemical usage.");
+    return;
+  }
+
+  const chemicalName = String(chemicalNameSelect?.value || "").trim();
+  const quantity = Number(chemicalQuantityInput?.value);
+  const unit = String(chemicalUnitSelect?.value || "").trim();
+  const notes = String(chemicalNotesInput?.value || "").trim();
+
+  if (!chemicalName) {
+    alert("Please select a chemical name.");
+    return;
+  }
+
+  if (!Number.isFinite(quantity) || quantity <= 0) {
+    alert("Please enter a valid quantity greater than zero.");
+    return;
+  }
+
+  if (!unit) {
+    alert("Please select a unit.");
+    return;
+  }
+
+  const task = getCurrentCleaningTask();
+  if (!task) {
+    alert("Task not found. Close and reopen the cleaning to continue.");
+    return;
+  }
+
+  const property = properties.find((item) => item.id === task.property_id);
+  const propertyName = property?.property_name || task.property_name || "Unknown Property";
+  const serviceDate = cleaningDate?.value || task.service_date || task.scheduled_date;
+
+  const payload = {
+    task_id: task.id,
+    property_id: task.property_id,
+    property_name: propertyName,
+    service_date: serviceDate,
+    chemical_name: chemicalName,
+    quantity,
+    unit,
+    notes: notes || null,
+    created_by: String(task.technician || cleaningTechnician?.value || "Tech").trim() || "Tech",
+  };
+
+  let response;
+  if (editingChemicalUsageId) {
+    response = await supabaseClient
+      .from("chemical_usage")
+      .update(payload)
+      .eq("id", editingChemicalUsageId);
+  } else {
+    response = await supabaseClient
+      .from("chemical_usage")
+      .insert([payload]);
+  }
+
+  if (response.error) {
+    alert("Error saving chemical usage: " + response.error.message);
+    return;
+  }
+
+  closeChemicalUsageModal();
+  await loadChemicalUsageEntries();
+  renderChemicalUsageForCurrentTask();
+}
+
+async function deleteChemicalUsageEntry(entryId) {
+  if (!canEditChemicalEntries()) return;
+  if (!confirm("Delete this chemical entry?")) return;
+
+  const { error } = await supabaseClient
+    .from("chemical_usage")
+    .delete()
+    .eq("id", entryId);
+
+  if (error) {
+    alert("Error deleting chemical entry: " + error.message);
+    return;
+  }
+
+  await loadChemicalUsageEntries();
+  renderChemicalUsageForCurrentTask();
 }
 
 function getWeekRangeForMessage() {
@@ -1987,35 +2361,166 @@ function formatIncludedDaysLabel(includedDaysSet) {
   return orderedDayNames.filter((day) => includedDaysSet.has(day)).join("/");
 }
 
-function findSameDayTurnover(propertyId, serviceDate) {
-  if (!propertyId || !serviceDate) return null;
+function normalizeDateKey(value) {
+  if (!value) return null;
 
-  for (const checkOut of reservations) {
-    if (checkOut.property_id !== propertyId) continue;
-    if (!checkOut.check_out || checkOut.check_out !== serviceDate) continue;
+  if (value instanceof Date) {
+    const year = value.getUTCFullYear();
+    const month = String(value.getUTCMonth() + 1).padStart(2, "0");
+    const day = String(value.getUTCDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
 
-    const checkIn = reservations.find((reservation) => {
-      return reservation.id !== checkOut.id
-        && reservation.property_id === propertyId
-        && reservation.check_in === serviceDate;
+  const stringValue = String(value).trim();
+  const isoDateMatch = stringValue.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (isoDateMatch) return isoDateMatch[1];
+
+  const parsed = new Date(stringValue);
+  if (Number.isNaN(parsed.getTime())) return null;
+
+  const year = parsed.getUTCFullYear();
+  const month = String(parsed.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(parsed.getUTCDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function normalizePropertyId(value) {
+  if (value === undefined || value === null) return "";
+  return String(value).trim();
+}
+
+function normalizePropertyName(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function getTaskPropertyMatchInfo(task) {
+  const taskPropertyId = normalizePropertyId(task?.property_id ?? task?.propertyId);
+  const propertyById = taskPropertyId
+    ? properties.find((property) => normalizePropertyId(property.id) === taskPropertyId)
+    : null;
+  const propertyNameFromProperty = normalizePropertyName(propertyById?.property_name);
+  const taskPropertyName = normalizePropertyName(task?.property_name || task?.propertyName);
+
+  return {
+    propertyId: taskPropertyId,
+    propertyNameFromProperty,
+    taskPropertyName,
+    displayName: propertyById?.property_name || task?.property_name || task?.propertyName || "Unknown Property",
+  };
+}
+
+function reservationMatchesTaskProperty(reservation, taskProperty) {
+  const reservationPropertyId = normalizePropertyId(reservation?.property_id ?? reservation?.propertyId);
+  if (taskProperty.propertyId && reservationPropertyId && taskProperty.propertyId === reservationPropertyId) return true;
+
+  const reservationProperty = reservationPropertyId
+    ? properties.find((property) => normalizePropertyId(property.id) === reservationPropertyId)
+    : null;
+  const reservationPropertyName = normalizePropertyName(
+    reservation?.property_name || reservation?.propertyName || reservationProperty?.property_name
+  );
+
+  if (taskProperty.propertyNameFromProperty && reservationPropertyName && taskProperty.propertyNameFromProperty === reservationPropertyName) {
+    return true;
+  }
+
+  if (taskProperty.taskPropertyName && reservationPropertyName && taskProperty.taskPropertyName === reservationPropertyName) {
+    return true;
+  }
+
+  return false;
+}
+
+function getSameDayTurnoverForTask(task) {
+  if (!isTaskGuestReady(task)) return null;
+
+  const taskDate = normalizeDateKey(task?.service_date || task?.scheduled_date || task?.serviceDate || task?.date);
+  const taskProperty = getTaskPropertyMatchInfo(task);
+  const hasPropertyMatchKey = Boolean(taskProperty.propertyId || taskProperty.propertyNameFromProperty || taskProperty.taskPropertyName);
+
+  if (!taskDate || !hasPropertyMatchKey) {
+    console.log("SAME DAY DEBUG", {
+      taskPropertyName: taskProperty.displayName,
+      taskPropertyId: taskProperty.propertyId || null,
+      taskServiceDateNormalized: taskDate,
+      reservationsForSameProperty: [],
+      hasCheckIn: false,
+      hasCheckOut: false,
+      sameDayTurnover: false,
+    });
+    return null;
+  }
+
+  const reservationsForSameProperty = reservations.filter((reservation) => reservationMatchesTaskProperty(reservation, taskProperty));
+
+  let hasCheckIn = false;
+  let hasCheckOut = false;
+  let checkInDate = null;
+  let checkOutDate = null;
+  const reservationDebugRows = [];
+
+  for (const reservation of reservationsForSameProperty) {
+    const reservationPropertyId = normalizePropertyId(reservation?.property_id ?? reservation?.propertyId) || null;
+    const reservationCheckIn = normalizeDateKey(reservation?.check_in ?? reservation?.checkIn ?? reservation?.startDate);
+    const reservationCheckOut = normalizeDateKey(reservation?.check_out ?? reservation?.checkOut ?? reservation?.endDate);
+
+    reservationDebugRows.push({
+      reservationId: reservation?.id || null,
+      reservationPropertyId,
+      reservationPropertyName: reservation?.property_name || reservation?.propertyName || null,
+      reservationCheckInNormalized: reservationCheckIn,
+      reservationCheckOutNormalized: reservationCheckOut,
     });
 
-    if (checkIn) {
-      return {
-        turnoverDate: serviceDate,
-        checkOutDate: checkOut.check_out,
-        checkInDate: checkIn.check_in,
-      };
+    if (reservationCheckIn === taskDate) {
+      hasCheckIn = true;
+      checkInDate = reservationCheckIn;
     }
+
+    if (reservationCheckOut === taskDate) {
+      hasCheckOut = true;
+      checkOutDate = reservationCheckOut;
+    }
+  }
+
+  const sameDayTurnover = hasCheckIn && hasCheckOut;
+
+  console.log("SAME DAY DEBUG", {
+    taskPropertyName: taskProperty.displayName,
+    taskPropertyId: taskProperty.propertyId || null,
+    taskServiceDateNormalized: taskDate,
+    reservationsForSameProperty: reservationDebugRows,
+    hasCheckIn,
+    hasCheckOut,
+    sameDayTurnover,
+  });
+
+  if (sameDayTurnover) {
+    return {
+      turnoverDate: taskDate,
+      checkOutDate,
+      checkInDate,
+      propertyName: taskProperty.displayName,
+    };
   }
 
   return null;
 }
 
+function isSameDayTurnoverTask(task) {
+  return Boolean(getSameDayTurnoverForTask(task));
+}
+
+function findSameDayTurnover(propertyId, serviceDate) {
+  return getSameDayTurnoverForTask({
+    guest_ready: true,
+    property_id: propertyId,
+    service_date: serviceDate,
+  });
+}
+
 function isSameDayCheckInGuestReadyTask(task) {
-  if (!isTaskGuestReady(task)) return false;
-  const serviceDate = task.service_date || task.scheduled_date;
-  return Boolean(findSameDayTurnover(task.property_id, serviceDate));
+  return isSameDayTurnoverTask(task);
 }
 
 function isAutoWeeklyTask(task) {
@@ -2149,6 +2654,245 @@ function applyManualBillingOverrideTag(notes, shouldApply) {
   const cleanNotes = stripManualBillingOverrideTag(notes);
   if (!shouldApply) return cleanNotes;
   return cleanNotes ? `${MANUAL_BILLING_OVERRIDE_TAG} ${cleanNotes}` : MANUAL_BILLING_OVERRIDE_TAG;
+}
+
+function getChemicalReportRows() {
+  if (!chemicalReportStartDate || !chemicalReportEndDate) return [];
+
+  const startDate = chemicalReportStartDate.value;
+  const endDate = chemicalReportEndDate.value;
+  if (!startDate || !endDate) return [];
+
+  const selectedPropertyId = chemicalReportPropertySelect?.value || "";
+  const selectedChemical = chemicalReportTypeSelect?.value || "";
+
+  return chemicalUsageEntries
+    .filter((entry) => {
+      const dateValue = String(entry.service_date || "");
+      return Boolean(dateValue && dateValue >= startDate && dateValue <= endDate);
+    })
+    .filter((entry) => !selectedPropertyId || normalizePropertyId(entry.property_id) === normalizePropertyId(selectedPropertyId))
+    .filter((entry) => !selectedChemical || String(entry.chemical_name || "") === selectedChemical)
+    .sort((a, b) => {
+      const propertyCompare = String(a.property_name || "").localeCompare(String(b.property_name || ""));
+      if (propertyCompare !== 0) return propertyCompare;
+      return String(a.service_date || "").localeCompare(String(b.service_date || ""));
+    });
+}
+
+function renderChemicalUsageReport() {
+  if (!chemicalReportContainer) return;
+
+  const propertyOptions = `<option value="">All Properties</option>${properties
+    .slice()
+    .sort((a, b) => String(a.property_name || "").localeCompare(String(b.property_name || "")))
+    .map((property) => `<option value="${property.id}">${property.property_name}</option>`)
+    .join("")}`;
+
+  if (chemicalReportPropertySelect && chemicalReportPropertySelect.innerHTML !== propertyOptions) {
+    const previousValue = chemicalReportPropertySelect.value;
+    chemicalReportPropertySelect.innerHTML = propertyOptions;
+    chemicalReportPropertySelect.value = previousValue;
+  }
+
+  const chemicalTypeOptions = `<option value="">All Chemicals</option>${CHEMICAL_NAME_OPTIONS
+    .map((name) => `<option value="${name}">${name}</option>`)
+    .join("")}`;
+
+  if (chemicalReportTypeSelect && chemicalReportTypeSelect.innerHTML !== chemicalTypeOptions) {
+    const previousValue = chemicalReportTypeSelect.value;
+    chemicalReportTypeSelect.innerHTML = chemicalTypeOptions;
+    chemicalReportTypeSelect.value = previousValue;
+  }
+
+  const startDate = chemicalReportStartDate?.value || "";
+  const endDate = chemicalReportEndDate?.value || "";
+  if (!startDate || !endDate) {
+    chemicalReportContainer.innerHTML = `<div class="empty">Select a start and end date to run the chemical usage report.</div>`;
+    return;
+  }
+
+  const selectedPropertyId = chemicalReportPropertySelect?.value || "";
+  const selectedChemical = chemicalReportTypeSelect?.value || "";
+  const selectedPropertyName = selectedPropertyId
+    ? (properties.find((property) => normalizePropertyId(property.id) === normalizePropertyId(selectedPropertyId))?.property_name || "Unknown Property")
+    : "All Properties";
+  const generatedDate = new Date().toLocaleDateString();
+
+  const rows = getChemicalReportRows();
+  latestChemicalReportState = {
+    startDate,
+    endDate,
+    selectedPropertyId,
+    selectedChemical,
+    rows,
+  };
+
+  if (!rows.length) {
+    chemicalReportContainer.innerHTML = `
+      <div class="billing-report-sheet chemical-report-sheet">
+        ${renderBillingReportHeader()}
+        <h2 class="billing-report-title">Chemical Usage Report</h2>
+        <div class="billing-report-meta">Date Range: ${startDate} to ${endDate}</div>
+        <div class="billing-report-meta">Property: ${selectedPropertyName}</div>
+        <div class="billing-report-meta">Chemical: ${selectedChemical || "All Chemicals"}</div>
+        <div class="billing-report-meta">Generated: ${generatedDate}</div>
+        <div class="empty">No chemical usage entries found for the selected filters.</div>
+        ${renderBillingReportFooter()}
+      </div>
+    `;
+    return;
+  }
+
+  const detailRows = rows.map((entry) => `
+    <tr>
+      <td>${entry.property_name || "Unknown Property"}</td>
+      <td>${entry.service_date || "-"}</td>
+      <td>${entry.chemical_name || "-"}</td>
+      <td>${Number(entry.quantity || 0).toFixed(2).replace(/\.00$/, "")}</td>
+      <td>${entry.unit || "-"}</td>
+      <td>${entry.notes || ""}</td>
+    </tr>
+  `).join("");
+
+  const totalsByProperty = new Map();
+  const overallTotals = new Map();
+
+  for (const entry of rows) {
+    const propertyName = entry.property_name || "Unknown Property";
+    const propertyKey = `${propertyName}|${entry.chemical_name || "Unknown"}|${entry.unit || "unit"}`;
+    const overallKey = `${entry.chemical_name || "Unknown"}|${entry.unit || "unit"}`;
+
+    totalsByProperty.set(propertyKey, {
+      propertyName,
+      chemicalName: entry.chemical_name || "Unknown",
+      unit: entry.unit || "unit",
+      total: (totalsByProperty.get(propertyKey)?.total || 0) + Number(entry.quantity || 0),
+    });
+
+    overallTotals.set(overallKey, {
+      chemicalName: entry.chemical_name || "Unknown",
+      unit: entry.unit || "unit",
+      total: (overallTotals.get(overallKey)?.total || 0) + Number(entry.quantity || 0),
+    });
+  }
+
+  const groupedByPropertyName = new Map();
+  for (const totalRow of totalsByProperty.values()) {
+    if (!groupedByPropertyName.has(totalRow.propertyName)) {
+      groupedByPropertyName.set(totalRow.propertyName, []);
+    }
+    groupedByPropertyName.get(totalRow.propertyName).push(totalRow);
+  }
+
+  const totalsByPropertyMarkup = Array.from(groupedByPropertyName.entries())
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([propertyName, totals]) => `
+      <section class="billing-report-group">
+        <h3>${propertyName}</h3>
+        <ul class="chemical-total-list">
+          ${totals
+            .sort((a, b) => a.chemicalName.localeCompare(b.chemicalName))
+            .map((item) => `<li>${item.chemicalName}: ${item.total.toFixed(2).replace(/\.00$/, "")} ${item.unit}</li>`)
+            .join("")}
+        </ul>
+      </section>
+    `).join("");
+
+  const overallTotalsMarkup = Array.from(overallTotals.values())
+    .sort((a, b) => a.chemicalName.localeCompare(b.chemicalName))
+    .map((item) => `<li>${item.chemicalName}: ${item.total.toFixed(2).replace(/\.00$/, "")} ${item.unit}</li>`)
+    .join("");
+
+  chemicalReportContainer.innerHTML = `
+    <div class="billing-report-sheet chemical-report-sheet">
+      ${renderBillingReportHeader()}
+      <h2 class="billing-report-title">Chemical Usage Report</h2>
+      <div class="billing-report-meta">Date Range: ${startDate} to ${endDate}</div>
+      <div class="billing-report-meta">Property: ${selectedPropertyName}</div>
+      <div class="billing-report-meta">Chemical: ${selectedChemical || "All Chemicals"}</div>
+      <div class="billing-report-meta">Generated: ${generatedDate}</div>
+
+      <section class="billing-report-group">
+        <h3>Usage Details</h3>
+        <table class="billing-report-table">
+          <thead>
+            <tr>
+              <th>Property Name</th>
+              <th>Service Date</th>
+              <th>Chemical</th>
+              <th>Quantity</th>
+              <th>Unit</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${detailRows}
+          </tbody>
+        </table>
+      </section>
+
+      <section class="billing-report-group">
+        <h3>Totals By Property</h3>
+        ${totalsByPropertyMarkup}
+      </section>
+
+      <section class="billing-report-group">
+        <h3>Overall Totals By Chemical</h3>
+        <ul class="chemical-total-list">
+          ${overallTotalsMarkup}
+        </ul>
+      </section>
+
+      ${renderBillingReportFooter()}
+    </div>
+  `;
+}
+
+async function shareChemicalUsageReport() {
+  const rows = latestChemicalReportState.rows || [];
+  if (!rows.length) {
+    alert("Run the chemical usage report first to share it.");
+    return;
+  }
+
+  const selectedPropertyName = latestChemicalReportState.selectedPropertyId
+    ? (properties.find((property) => normalizePropertyId(property.id) === normalizePropertyId(latestChemicalReportState.selectedPropertyId))?.property_name || "Unknown Property")
+    : "All Properties";
+
+  const previewLines = rows.slice(0, 8).map((row) => {
+    return `${row.service_date} | ${row.property_name || "Unknown Property"} | ${row.chemical_name} ${Number(row.quantity || 0).toFixed(2).replace(/\.00$/, "")} ${row.unit}`;
+  });
+
+  const text = [
+    `${companyProfile.company_name} - Chemical Usage Report`,
+    `Date Range: ${latestChemicalReportState.startDate} to ${latestChemicalReportState.endDate}`,
+    `Property: ${selectedPropertyName}`,
+    `Chemical: ${latestChemicalReportState.selectedChemical || "All Chemicals"}`,
+    "",
+    ...previewLines,
+    rows.length > previewLines.length ? `...and ${rows.length - previewLines.length} more entries.` : "",
+  ].filter(Boolean).join("\n");
+
+  if (navigator.share) {
+    try {
+      await navigator.share({
+        title: "Chemical Usage Report",
+        text,
+      });
+      return;
+    } catch (error) {
+      if (error?.name === "AbortError") return;
+    }
+  }
+
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    alert("Report summary copied to clipboard.");
+    return;
+  }
+
+  alert("Share is not available on this device/browser.");
 }
 
 function renderBillingReportHeader() {
@@ -2700,30 +3444,43 @@ function renderTaskCard(task) {
 
 function getGuestProtectionAlerts() {
   const alerts = [];
-  const seenTurnovers = new Set();
+  const grouped = new Map();
 
-  for (const checkOut of reservations) {
-    if (!checkOut.check_out) continue;
-    for (const checkIn of reservations) {
-      if (checkIn.id === checkOut.id) continue;
-      if (checkIn.property_id !== checkOut.property_id) continue;
-      if (checkIn.check_in !== checkOut.check_out) continue;
+  for (const reservation of reservations) {
+    const reservationPropertyId = normalizePropertyId(reservation?.property_id ?? reservation?.propertyId);
+    const reservationPropertyName = normalizePropertyName(reservation?.property_name || reservation?.propertyName);
+    const propertyKey = reservationPropertyId ? `id:${reservationPropertyId}` : reservationPropertyName ? `name:${reservationPropertyName}` : "";
+    if (!propertyKey) continue;
 
-      // Deduplicate by property + turnover date
-      const key = `${checkIn.property_id}|${checkIn.check_in}`;
-      if (seenTurnovers.has(key)) continue;
-      seenTurnovers.add(key);
+    if (!grouped.has(propertyKey)) {
+      const propertyById = reservationPropertyId
+        ? properties.find((property) => String(property.id) === reservationPropertyId)
+        : null;
 
-      const property = properties.find(p => p.id === checkIn.property_id);
-      if (!property) continue;
+      grouped.set(propertyKey, {
+        propertyName: propertyById?.property_name || reservation?.property_name || reservation?.propertyName || "Unknown Property",
+        checkIns: new Set(),
+        checkOuts: new Set(),
+      });
+    }
 
+    const group = grouped.get(propertyKey);
+    const checkInDate = normalizeDateKey(reservation?.check_in ?? reservation?.checkIn ?? reservation?.startDate);
+    const checkOutDate = normalizeDateKey(reservation?.check_out ?? reservation?.checkOut ?? reservation?.endDate);
+    if (checkInDate) group.checkIns.add(checkInDate);
+    if (checkOutDate) group.checkOuts.add(checkOutDate);
+  }
+
+  for (const group of grouped.values()) {
+    for (const checkInDate of group.checkIns) {
+      if (!group.checkOuts.has(checkInDate)) continue;
       alerts.push({
         type: "turnover",
         status: "red",
-        propertyName: property.property_name,
-        turnoverDate: checkIn.check_in,
-        checkOutDate: checkOut.check_out,
-        checkInDate: checkIn.check_in,
+        propertyName: group.propertyName,
+        turnoverDate: checkInDate,
+        checkOutDate: checkInDate,
+        checkInDate,
       });
     }
   }
@@ -2747,18 +3504,9 @@ function renderGuestProtectionAlerts() {
 }
 
 function getAlertBadgeForTask(task) {
-  const alerts = getGuestProtectionAlerts();
-  const property = properties.find(p => p.id === task.property_id);
-  if (!property) return "";
-
-  const pName = property.property_name.replace(/'/g, "\\'");
-
-  const turnover = alerts.find(
-    a => a.type === "turnover" &&
-         a.propertyName === property.property_name &&
-         a.turnoverDate === task.service_date
-  );
+  const turnover = getSameDayTurnoverForTask(task);
   if (turnover) {
+    const pName = String(turnover.propertyName || getPropertyName(task.property_id) || "Unknown Property").replace(/'/g, "\\'");
     return `<span class="task-alert-badge badge-alert-red" style="cursor:pointer"
       onclick="openAlertDetail('${pName}','${turnover.turnoverDate}','${turnover.checkOutDate}','${turnover.checkInDate}')">🚨 Same-Day Turnover</span>`;
   }
@@ -2964,38 +3712,117 @@ function renderWeekViewCalendar(weekTasks) {
   weekTasksCalendarContainer.innerHTML = calendarHTML;
 }
 
+function getPropertyDetailTab(propertyId) {
+  return propertyDetailTabState.get(propertyId) || "tasks";
+}
+
+function setPropertyDetailTab(propertyId, tabName) {
+  propertyDetailTabState.set(propertyId, tabName === "history" ? "history" : "tasks");
+  renderProperties();
+}
+
+function getPropertyChemicalFilters(propertyId) {
+  if (!propertyChemicalFilterState.has(propertyId)) {
+    propertyChemicalFilterState.set(propertyId, {
+      startDate: "",
+      endDate: "",
+      chemicalName: "",
+    });
+  }
+  return propertyChemicalFilterState.get(propertyId);
+}
+
+function updatePropertyChemicalFilter(propertyId, key, value) {
+  const current = getPropertyChemicalFilters(propertyId);
+  current[key] = value || "";
+  propertyChemicalFilterState.set(propertyId, current);
+  renderProperties();
+}
+
+function renderPropertyChemicalHistory(property) {
+  const filters = getPropertyChemicalFilters(property.id);
+  const rows = chemicalUsageEntries
+    .filter((entry) => normalizePropertyId(entry.property_id) === normalizePropertyId(property.id))
+    .filter((entry) => !filters.startDate || String(entry.service_date || "") >= filters.startDate)
+    .filter((entry) => !filters.endDate || String(entry.service_date || "") <= filters.endDate)
+    .filter((entry) => !filters.chemicalName || String(entry.chemical_name || "") === filters.chemicalName)
+    .sort((a, b) => String(b.service_date || "").localeCompare(String(a.service_date || "")));
+
+  const chemicalOptions = `<option value="">All Chemicals</option>${CHEMICAL_NAME_OPTIONS
+    .map((name) => `<option value="${name}" ${filters.chemicalName === name ? "selected" : ""}>${name}</option>`)
+    .join("")}`;
+
+  const tableRows = rows.length
+    ? rows.map((entry) => `
+        <tr>
+          <td>${entry.service_date || "-"}</td>
+          <td>${entry.chemical_name || "-"}</td>
+          <td>${Number(entry.quantity || 0).toFixed(2).replace(/\.00$/, "")}</td>
+          <td>${entry.unit || "-"}</td>
+          <td>${entry.notes || ""}</td>
+        </tr>
+      `).join("")
+    : `<tr><td colspan="5">No chemical usage found for this property and filter selection.</td></tr>`;
+
+  return `
+    <div class="property-chemical-history">
+      <div class="property-chemical-filters">
+        <div class="filter-group">
+          <label>Start:</label>
+          <input type="date" value="${filters.startDate}" onchange="updatePropertyChemicalFilter('${property.id}','startDate',this.value)">
+        </div>
+        <div class="filter-group">
+          <label>End:</label>
+          <input type="date" value="${filters.endDate}" onchange="updatePropertyChemicalFilter('${property.id}','endDate',this.value)">
+        </div>
+        <div class="filter-group">
+          <label>Chemical:</label>
+          <select onchange="updatePropertyChemicalFilter('${property.id}','chemicalName',this.value)">
+            ${chemicalOptions}
+          </select>
+        </div>
+      </div>
+      <table class="route-frag-table property-chemical-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Chemical</th>
+            <th>Qty</th>
+            <th>Unit</th>
+            <th>Notes</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${tableRows}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
 function renderProperties() {
   document.getElementById("propertyCount").textContent = properties.length;
 
-  // Calculate current month Off-Cycle charges
   const now = new Date();
   const currentYear = now.getFullYear();
   const currentMonth = now.getMonth();
-  
-  const monthStart = new Date(currentYear, currentMonth, 1);
-  const monthEnd = new Date(currentYear, currentMonth + 1, 0);
-  const monthStartString = formatDateValue(monthStart);
-  const monthEndString = formatDateValue(monthEnd);
-  
-  // Update month label and refresh billing card
+
   const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
   const monthLabel = `${monthNames[currentMonth]} ${currentYear}`;
   document.getElementById("currentMonthLabel").textContent = monthLabel;
-  
+
   refreshBillingCard();
 
-  // Update property filter dropdown
   const propertyOptions = propertyFilterSelect.innerHTML;
-  const newOptions = `<option value="">All Properties</option>${properties.map(p => `<option value="${p.id}">${p.property_name}</option>`).join("")}`;
+  const newOptions = `<option value="">All Properties</option>${properties.map((p) => `<option value="${p.id}">${p.property_name}</option>`).join("")}`;
   if (propertyOptions !== newOptions) {
     propertyFilterSelect.innerHTML = newOptions;
     propertyFilterSelect.value = selectedPropertyFilter;
   }
 
-  // Filter properties based on selected filter
   let filteredProperties = properties;
   if (selectedPropertyFilter) {
-    filteredProperties = properties.filter(p => p.id === selectedPropertyFilter);
+    filteredProperties = properties.filter((p) => p.id === selectedPropertyFilter);
   }
 
   if (filteredProperties.length === 0) {
@@ -3003,16 +3830,83 @@ function renderProperties() {
     return;
   }
 
-  propertyList.innerHTML = filteredProperties.map(property => {
-    let tasks = cleaningTasks.filter(task => task.property_id === property.id);
-    tasks = tasks.filter(task => !shouldSuppressWeeklyStandardTaskDisplay(task));
-    
-    // Apply month filter to tasks
-    tasks = tasks.filter(task => taskMatchesDateFilter(task, selectedMonthFilter));
+  propertyList.innerHTML = filteredProperties.map((property) => {
+    let tasks = cleaningTasks.filter((task) => task.property_id === property.id);
+    tasks = tasks.filter((task) => !shouldSuppressWeeklyStandardTaskDisplay(task));
+    tasks = tasks.filter((task) => taskMatchesDateFilter(task, selectedMonthFilter));
+
     const hasSameDayGuestReady = tasks.some((task) => isSameDayCheckInGuestReadyTask(task));
-    
     const isCollapsed = collapsedPropertyCards.has(property.id);
     const toggleButtonText = isCollapsed ? "Expand" : "Collapse";
+    const activeTab = getPropertyDetailTab(property.id);
+
+    const taskContent = tasks.length === 0
+      ? `<p>No cleanings scheduled.</p>`
+      : tasks.map((task) => {
+          const taskBillingAmount = getTaskBillingAmount(task);
+          const billingContext = getTaskBillingContext(task);
+          const guestReadyBilling = billingContext.guestReadyBilling || null;
+          const showReconcile = shouldShowReconcileForTask(task);
+          const invoiceMarkerClass = task.invoiced ? "invoice-marker-checked" : "invoice-marker-unchecked";
+          const taskClass =
+            task.status === "Completed"
+              ? "task-item completed"
+              : task.guest_ready
+                ? "task-item guestready"
+                : task.off_cycle
+                  ? "task-item offcycle"
+                  : "task-item";
+
+          const badge =
+            task.status === "Completed"
+              ? `<span class="status-badge badge-green">COMPLETED</span>`
+              : task.guest_ready
+                ? `<span class="status-badge badge-yellow">GUEST READY</span>`
+                : task.off_cycle
+                  ? `<span class="status-badge badge-purple">OFF CYCLE</span>`
+                  : `<span class="status-badge badge-blue">SCHEDULED</span>`;
+
+          const billingLine = guestReadyBilling
+            ? guestReadyBilling.isManualOverride
+              ? `<div class="task-line"><small>Billing: Manual Override (entered charge; rule: ${guestReadyBilling.coverageRuleLabel}; included days: ${guestReadyBilling.includedDaysLabel})</small></div>`
+              : guestReadyBilling.isIncluded
+                ? `<div class="task-line"><small>Billing: Included (${guestReadyBilling.serviceDay}; rule: ${guestReadyBilling.coverageRuleLabel}; included days: ${guestReadyBilling.includedDaysLabel})</small></div>`
+                : `<div class="task-line"><small>Billing: Chargeable (${guestReadyBilling.serviceDay || "Outside route window"}; rule: ${guestReadyBilling.coverageRuleLabel}; included days: ${guestReadyBilling.includedDaysLabel})</small></div>`
+            : taskBillingAmount > 0
+              ? `<div class="task-line"><small>Billing: Manual Charge</small></div>`
+              : "";
+
+          const sameDayBadge = isSameDayCheckInGuestReadyTask(task)
+            ? `<span class="task-alert-badge badge-alert-red">🚨 Same-Day Check-In</span>`
+            : "";
+
+          return `
+            <div class="${taskClass}">
+              <div class="task-item-header">
+                <div class="task-title">${task.service_date} — ${task.service_type}</div>
+                ${showReconcile ? `
+                <label class="invoice-marker ${invoiceMarkerClass}">
+                  <input type="checkbox" ${task.invoiced ? "checked" : ""} onchange="toggleInvoiceMarker('${task.id}')" />
+                  <span>$ Reconcile</span>
+                </label>
+                ` : ""}
+              </div>
+              ${badge}
+              ${sameDayBadge}
+              ${taskBillingAmount > 0 ? `<div class="task-line">$${taskBillingAmount}</div>` : ""}
+              ${billingLine}
+              <div class="task-line"><small>Status: ${task.status}</small></div>
+              ${task.completed_at ? `<div class="task-line"><small>Completed: ${new Date(task.completed_at).toLocaleString()}</small></div>` : ""}
+              ${task.check_in_date ? `<div class="task-line"><small>Prior to check-in: ${task.check_in_date}</small></div>` : ""}
+              ${task.notes ? `<div class="task-line"><small>Notes: ${stripManualBillingOverrideTag(task.notes)}</small></div>` : ""}
+              <div class="task-buttons">
+                <button onclick="openEditCleaning('${task.id}')">Edit</button>
+                ${task.status !== "Completed" ? `<button onclick="markCleaningComplete('${task.id}')">Complete</button>` : ""}
+                <button class="delete-btn" onclick="deleteCleaningTask('${task.id}')">Delete</button>
+              </div>
+            </div>
+          `;
+        }).join("");
 
     return `
       <div class="property-card">
@@ -3037,7 +3931,6 @@ function renderProperties() {
           <button onclick="openCleaningModal('${property.id}')">+ Cleaning</button>
           <button onclick="openEditModal('${property.id}')">Edit</button>
           <button class="delete-btn" onclick="deleteProperty('${property.id}')">Delete</button>
-
         </div>
 
         <div class="reminders-section">
@@ -3046,18 +3939,18 @@ function renderProperties() {
             <button class="add-reminder-btn" onclick="openReminderModal('${property.id}')">+ Reminder</button>
           </div>
           ${(() => {
-            const propertyReminders = operationsReminders.filter(r => r.property_id === property.id && r.status === "Open");
+            const propertyReminders = operationsReminders.filter((r) => r.property_id === property.id && r.status === "Open");
             if (propertyReminders.length === 0) {
               return `<p class="no-reminders">No open reminders.</p>`;
             }
-            return propertyReminders.map(reminder => {
+            return propertyReminders.map((reminder) => {
               const today = new Date();
               today.setHours(0, 0, 0, 0);
               const dueDate = parseDateString(reminder.due_date);
               const isOverdue = dueDate < today;
               const daysUntilDue = Math.ceil((dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
               const reminderClass = isOverdue ? "reminder-item overdue" : daysUntilDue <= 3 ? "reminder-item urgent" : "reminder-item";
-              
+
               return `
                 <div class="${reminderClass}">
                   <div class="reminder-title">${reminder.title}</div>
@@ -3074,77 +3967,12 @@ function renderProperties() {
           })()}
         </div>
 
-        <div class="task-list ${isCollapsed ? 'collapsed' : ''}">
-          <h4>Scheduled Cleanings</h4>
-          ${
-            tasks.length === 0
-              ? `<p>No cleanings scheduled.</p>`
-              : tasks.map((task) => {
-                  const taskBillingAmount = getTaskBillingAmount(task);
-                  const billingContext = getTaskBillingContext(task);
-                  const guestReadyBilling = billingContext.guestReadyBilling || null;
-                  const showReconcile = shouldShowReconcileForTask(task);
-                  const invoiceMarkerClass = task.invoiced ? "invoice-marker-checked" : "invoice-marker-unchecked";
-                  const taskClass =
-                    task.status === "Completed"
-                      ? "task-item completed"
-                      : task.guest_ready
-                      ? "task-item guestready"
-                      : task.off_cycle
-                      ? "task-item offcycle"
-                      : "task-item";
-
-                  const badge =
-                    task.status === "Completed"
-                      ? `<span class="status-badge badge-green">COMPLETED</span>`
-                      : task.guest_ready
-                      ? `<span class="status-badge badge-yellow">GUEST READY</span>`
-                      : task.off_cycle
-                      ? `<span class="status-badge badge-purple">OFF CYCLE</span>`
-                      : `<span class="status-badge badge-blue">SCHEDULED</span>`;
-
-                  const billingLine = guestReadyBilling
-                    ? guestReadyBilling.isManualOverride
-                      ? `<div class="task-line"><small>Billing: Manual Override (entered charge; rule: ${guestReadyBilling.coverageRuleLabel}; included days: ${guestReadyBilling.includedDaysLabel})</small></div>`
-                      : guestReadyBilling.isIncluded
-                      ? `<div class="task-line"><small>Billing: Included (${guestReadyBilling.serviceDay}; rule: ${guestReadyBilling.coverageRuleLabel}; included days: ${guestReadyBilling.includedDaysLabel})</small></div>`
-                      : `<div class="task-line"><small>Billing: Chargeable (${guestReadyBilling.serviceDay || "Outside route window"}; rule: ${guestReadyBilling.coverageRuleLabel}; included days: ${guestReadyBilling.includedDaysLabel})</small></div>`
-                    : taskBillingAmount > 0
-                      ? `<div class="task-line"><small>Billing: Manual Charge</small></div>`
-                      : "";
-
-                  const sameDayBadge = isSameDayCheckInGuestReadyTask(task)
-                    ? `<span class="task-alert-badge badge-alert-red">🚨 Same-Day Check-In</span>`
-                    : "";
-
-                  return `
-                    <div class="${taskClass}">
-                      <div class="task-item-header">
-                        <div class="task-title">${task.service_date} — ${task.service_type}</div>
-                        ${showReconcile ? `
-                        <label class="invoice-marker ${invoiceMarkerClass}">
-                          <input type="checkbox" ${task.invoiced ? "checked" : ""} onchange="toggleInvoiceMarker('${task.id}')" />
-                          <span>$ Reconcile</span>
-                        </label>
-                        ` : ""}
-                      </div>
-                      ${badge}
-                      ${sameDayBadge}
-                      ${taskBillingAmount > 0 ? `<div class="task-line">$${taskBillingAmount}</div>` : ""}
-                      ${billingLine}
-                      <div class="task-line"><small>Status: ${task.status}</small></div>
-                      ${task.completed_at ? `<div class="task-line"><small>Completed: ${new Date(task.completed_at).toLocaleString()}</small></div>` : ""}
-                      ${task.check_in_date ? `<div class="task-line"><small>Prior to check-in: ${task.check_in_date}</small></div>` : ""}
-                      ${task.notes ? `<div class="task-line"><small>Notes: ${stripManualBillingOverrideTag(task.notes)}</small></div>` : ""}
-                      <div class="task-buttons">
-                        <button onclick="openEditCleaning('${task.id}')">Edit</button>
-                        ${task.status !== "Completed" ? `<button onclick="markCleaningComplete('${task.id}')">Complete</button>` : ""}
-                        <button class="delete-btn" onclick="deleteCleaningTask('${task.id}')">Delete</button>
-                      </div>
-                    </div>
-                  `;
-                }).join("")
-          }
+        <div class="task-list ${isCollapsed ? "collapsed" : ""}">
+          <div class="property-detail-tabs">
+            <button type="button" class="property-detail-tab ${activeTab === "tasks" ? "active" : ""}" onclick="setPropertyDetailTab('${property.id}','tasks')">Scheduled Cleanings</button>
+            <button type="button" class="property-detail-tab ${activeTab === "history" ? "active" : ""}" onclick="setPropertyDetailTab('${property.id}','history')">Chemical History</button>
+          </div>
+          ${activeTab === "tasks" ? taskContent : renderPropertyChemicalHistory(property)}
         </div>
       </div>
     `;
@@ -3243,4 +4071,33 @@ function promptForProtectedViewPin() {
     pinInput.addEventListener("keydown", handleKeydown);
     pinModal.addEventListener("click", handleOverlayClick);
   });
+}
+
+function showChemicalReportWorkspace(showWorkspace) {
+  const workspace = document.getElementById("chemicalReportWorkspace");
+  const dashboard = document.getElementById("reportsDashboardCards");
+  if (!workspace || !dashboard) return;
+
+  workspace.classList.toggle("hidden", !showWorkspace);
+  dashboard.classList.toggle("hidden", Boolean(showWorkspace));
+
+  if (showWorkspace) {
+    renderChemicalUsageReport();
+  }
+}
+
+async function openReportFromDashboard(reportKey) {
+  if (reportKey === "billing") {
+    await navigateToView("billing");
+    return;
+  }
+
+  if (reportKey === "routeFragmentation") {
+    await navigateToView("routeFragmentation");
+    return;
+  }
+
+  if (reportKey === "chemical") {
+    showChemicalReportWorkspace(true);
+  }
 }
