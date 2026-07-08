@@ -3633,10 +3633,82 @@ function renderWeekViewList(weekTasks) {
     .map((date) => `
       <div class="week-group">
         <h3>${date}</h3>
-        ${grouped[date].map(renderTaskCard).join("")}
+        ${grouped[date].map(renderWeekViewListTaskCard).join("")}
       </div>
     `)
     .join("");
+}
+
+function renderWeekViewListTaskCard(task) {
+  const taskBillingAmount = getTaskBillingAmount(task);
+  const billingContext = getTaskBillingContext(task);
+  const guestReadyBilling = billingContext.guestReadyBilling || null;
+  const showReconcile = shouldShowReconcileForTask(task);
+  const invoiceMarkerClass = task.invoiced ? "invoice-marker-checked" : "invoice-marker-unchecked";
+  const status = String(task.status || "Scheduled");
+  const isCompleted = status === "Completed";
+  const isInProgress = status === "In Progress";
+  const taskClass =
+    isCompleted
+      ? "task-item completed"
+      : task.guest_ready
+        ? "task-item guestready"
+        : task.off_cycle
+          ? "task-item offcycle"
+          : "task-item";
+
+  const badge =
+    isCompleted
+      ? `<span class="status-badge badge-green">COMPLETED</span>`
+      : task.guest_ready
+        ? `<span class="status-badge badge-yellow">GUEST READY</span>`
+        : task.off_cycle
+          ? `<span class="status-badge badge-purple">OFF CYCLE</span>`
+          : `<span class="status-badge badge-blue">SCHEDULED</span>`;
+
+  const billingLine = guestReadyBilling
+    ? guestReadyBilling.isManualOverride
+      ? `<div class="task-line"><small>Billing: Manual Override (entered charge; rule: ${guestReadyBilling.coverageRuleLabel}; included days: ${guestReadyBilling.includedDaysLabel})</small></div>`
+      : guestReadyBilling.isIncluded
+        ? `<div class="task-line"><small>Billing: Included (${guestReadyBilling.serviceDay}; rule: ${guestReadyBilling.coverageRuleLabel}; included days: ${guestReadyBilling.includedDaysLabel})</small></div>`
+        : `<div class="task-line"><small>Billing: Chargeable (${guestReadyBilling.serviceDay || "Outside route window"}; rule: ${guestReadyBilling.coverageRuleLabel}; included days: ${guestReadyBilling.includedDaysLabel})</small></div>`
+    : taskBillingAmount > 0
+      ? `<div class="task-line"><small>Billing: Manual Charge</small></div>`
+      : "";
+
+  const sameDayBadge = isSameDayCheckInGuestReadyTask(task)
+    ? `<span class="task-alert-badge badge-alert-red">🚨 Same-Day Check-In</span>`
+    : "";
+
+  return `
+    <div class="${taskClass}">
+      <div class="task-item-header">
+        <div class="task-title">${getPropertyName(task.property_id)} — ${task.service_date || task.scheduled_date || "Not set"}</div>
+        ${showReconcile ? `
+        <label class="invoice-marker ${invoiceMarkerClass}">
+          <input type="checkbox" ${task.invoiced ? "checked" : ""} onchange="toggleInvoiceMarker('${task.id}')" />
+          <span>$ Reconcile</span>
+        </label>
+        ` : ""}
+      </div>
+      ${badge}
+      ${sameDayBadge}
+      <div class="task-line"><small>Task Type: ${task.service_type || "Manual"}</small></div>
+      <div class="task-line"><small>Guest Ready: ${isTaskGuestReady(task) ? "Yes" : "No"}</small></div>
+      ${taskBillingAmount > 0 ? `<div class="task-line">$${taskBillingAmount}</div>` : ""}
+      ${billingLine}
+      ${task.check_in_date ? `<div class="task-line"><small>Prior to check-in: ${task.check_in_date}</small></div>` : ""}
+      <div class="task-line"><small>Status: ${status}</small></div>
+      ${task.notes ? `<div class="task-line"><small>Notes: ${stripManualBillingOverrideTag(task.notes)}</small></div>` : ""}
+      ${task.completed_at ? `<div class="task-line"><small>Completed: ${new Date(task.completed_at).toLocaleString()}</small></div>` : ""}
+      <div class="task-buttons">
+        <button onclick="openEditCleaning('${task.id}')">Edit</button>
+        ${!isCompleted && !isInProgress ? `<button onclick="startCleaningTask('${task.id}')">Start</button>` : ""}
+        ${!isCompleted ? `<button onclick="markCleaningComplete('${task.id}')">Complete</button>` : ""}
+        <button class="delete-btn" onclick="deleteCleaningTask('${task.id}')">Delete</button>
+      </div>
+    </div>
+  `;
 }
 
 function renderWeekViewCalendar(weekTasks) {
