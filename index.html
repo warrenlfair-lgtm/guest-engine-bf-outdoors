@@ -410,6 +410,9 @@
     <label>Hostaway iCal URL</label>
     <input id="propertyIcal">
 
+    <label>SafetyCulture Checklist Link</label>
+    <input id="safetycultureChecklistUrl" type="url" placeholder="https://...">
+
     <label>Standard Service Day</label>
     <select id="standardDay">
       <option>Monday</option>
@@ -475,6 +478,11 @@
 
       <label>Notes</label>
       <textarea id="cleaningNotes" rows="3"></textarea>
+
+      <div class="task-checklist-access-row">
+        <button type="button" id="openSafetyCultureChecklistBtn" class="checklist-link-btn hidden">Open SafetyCulture Checklist</button>
+        <div id="cleaningChecklistHint" class="task-checklist-hint hidden">No checklist link assigned.</div>
+      </div>
 
       <div class="chemical-usage-section">
         <div class="chemical-usage-header-row">

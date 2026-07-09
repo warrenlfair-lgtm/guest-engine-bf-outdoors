@@ -580,6 +580,28 @@ button:hover {
     margin-top: 14px;
 }
 
+.checklist-link-btn {
+    background: #0f766e;
+}
+
+.checklist-link-btn:hover {
+    background: #115e59;
+}
+
+.task-checklist-hint {
+    font-size: 12px;
+    color: #64748b;
+    align-self: center;
+}
+
+.task-checklist-access-row {
+    margin-top: 12px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+}
+
 .week-group {
     margin-bottom: 20px;
 }

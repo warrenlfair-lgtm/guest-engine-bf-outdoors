@@ -77,6 +77,7 @@ const propertyName = document.getElementById("propertyName");
 const propertyClientName = document.getElementById("propertyClientName");
 const propertyAddress = document.getElementById("propertyAddress");
 const propertyIcal = document.getElementById("propertyIcal");
+const safetycultureChecklistUrl = document.getElementById("safetycultureChecklistUrl");
 const standardDay = document.getElementById("standardDay");
 const coverageDays = document.getElementById("coverageDays");
 const coverageRule = document.getElementById("coverageRule");
@@ -96,6 +97,8 @@ const chemicalNameSelect = document.getElementById("chemicalNameSelect");
 const chemicalQuantityInput = document.getElementById("chemicalQuantityInput");
 const chemicalUnitSelect = document.getElementById("chemicalUnitSelect");
 const chemicalNotesInput = document.getElementById("chemicalNotesInput");
+const openSafetyCultureChecklistBtn = document.getElementById("openSafetyCultureChecklistBtn");
+const cleaningChecklistHint = document.getElementById("cleaningChecklistHint");
 const cancelChemicalBtn = document.getElementById("cancelChemicalBtn");
 const saveChemicalBtn = document.getElementById("saveChemicalBtn");
 const viewButtons = Array.from(document.querySelectorAll(".view-btn"));
@@ -214,6 +217,10 @@ if (cancelChemicalBtn) {
 
 if (saveChemicalBtn) {
   saveChemicalBtn.addEventListener("click", saveChemicalUsageEntry);
+}
+
+if (openSafetyCultureChecklistBtn) {
+  openSafetyCultureChecklistBtn.addEventListener("click", openSafetyCultureChecklistForCurrentCleaning);
 }
 
 if (cleaningStatus) {
@@ -489,6 +496,69 @@ function getChemicalChargeContext(entry) {
   };
 }
 
+function normalizeSafetyCultureUrl(value) {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return "";
+  if (/^[a-zA-Z][a-zA-Z\d+\-.]*:/.test(trimmed)) {
+    return trimmed;
+  }
+  return `https://${trimmed}`;
+}
+
+function getPropertySafetyCultureUrl(propertyId) {
+  const property = properties.find((item) => item.id === propertyId);
+  return normalizeSafetyCultureUrl(property?.safetyculture_checklist_url || "");
+}
+
+function getTaskSafetyCultureUrl(task) {
+  if (!task) return "";
+  return getPropertySafetyCultureUrl(task.property_id);
+}
+
+function openSafetyCultureChecklist(url) {
+  const normalizedUrl = normalizeSafetyCultureUrl(url);
+  if (!normalizedUrl) {
+    alert("No checklist link assigned.");
+    return;
+  }
+
+  const win = window.open(normalizedUrl, "_blank", "noopener,noreferrer");
+  if (!win) {
+    alert("Could not open checklist link. Please allow popups for this site.");
+  }
+}
+
+function openSafetyCultureChecklistForTask(taskId) {
+  const task = cleaningTasks.find((item) => item.id === taskId);
+  if (!task) return;
+  openSafetyCultureChecklist(getTaskSafetyCultureUrl(task));
+}
+
+function openSafetyCultureChecklistForCurrentCleaning() {
+  const url = getPropertySafetyCultureUrl(selectedCleaningPropertyId);
+  openSafetyCultureChecklist(url);
+}
+
+function getSafetyCultureTaskActionMarkup(task) {
+  const checklistUrl = getTaskSafetyCultureUrl(task);
+  if (checklistUrl) {
+    return `<button type="button" class="checklist-link-btn" onclick="openSafetyCultureChecklistForTask('${task.id}')">Open SafetyCulture Checklist</button>`;
+  }
+  return `<div class="task-checklist-hint">No checklist link assigned.</div>`;
+}
+
+function renderCleaningSafetyCultureAccess() {
+  if (!openSafetyCultureChecklistBtn || !cleaningChecklistHint) return;
+  const url = getPropertySafetyCultureUrl(selectedCleaningPropertyId);
+  if (url) {
+    openSafetyCultureChecklistBtn.classList.remove("hidden");
+    cleaningChecklistHint.classList.add("hidden");
+  } else {
+    openSafetyCultureChecklistBtn.classList.add("hidden");
+    cleaningChecklistHint.classList.remove("hidden");
+  }
+}
+
 function buildChemicalUsageNameOptions(selectedName = "") {
   const names = getActiveChemicals().map((chemical) => chemical.name);
   const chosen = String(selectedName || "").trim();
@@ -753,6 +823,9 @@ function openEditModal(id) {
   propertyClientName.value = property.client_name || "";
   propertyAddress.value = property.address || "";
   propertyIcal.value = property.ical_url || "";
+  if (safetycultureChecklistUrl) {
+    safetycultureChecklistUrl.value = property.safetyculture_checklist_url || "";
+  }
   standardDay.value = property.standard_service_day || "Wednesday";
   coverageDays.value = property.coverage_days ?? 1;
   if (coverageRule) {
@@ -783,6 +856,7 @@ function openCleaningModal(propertyId) {
   cleaningTechnician.value = "";
   cleaningCharge.value = 0;
   cleaningNotes.value = "";
+  renderCleaningSafetyCultureAccess();
   clearChemicalUsageForm();
   renderChemicalUsageForCurrentTask();
 
@@ -806,6 +880,7 @@ function openEditCleaning(taskId) {
   cleaningTechnician.value = task.technician || "";
   cleaningCharge.value = task.charge || 0;
   cleaningNotes.value = stripManualBillingOverrideTag(task.notes || "");
+  renderCleaningSafetyCultureAccess();
   clearChemicalUsageForm();
   renderChemicalUsageForCurrentTask();
 
@@ -843,7 +918,9 @@ function closeCleaningModal(options = {}) {
   cleaningModal.classList.add("hidden");
   closeChemicalUsageModal();
   editingCleaningId = null;
+  selectedCleaningPropertyId = null;
   cleaningModalInitialState = null;
+  renderCleaningSafetyCultureAccess();
   renderChemicalUsageForCurrentTask();
 }
 
@@ -2203,6 +2280,7 @@ async function saveProperty() {
     client_name: String(propertyClientName?.value || "").trim() || null,
     address: propertyAddress.value.trim(),
     ical_url: propertyIcal.value.trim(),
+    safetyculture_checklist_url: normalizeSafetyCultureUrl(safetycultureChecklistUrl?.value || "") || null,
     standard_service_day: standardDay.value,
     coverage_days: selectedCoverageRule === "none" ? 0 : 1,
     coverage_rule: selectedCoverageRule,
@@ -2226,6 +2304,23 @@ async function saveProperty() {
     result = await supabaseClient
       .from("properties")
       .insert([propertyData]);
+  }
+
+  const safetyCultureColumnMissing = String(result?.error?.message || "").toLowerCase().includes("safetyculture_checklist_url");
+  if (result.error && safetyCultureColumnMissing) {
+    const legacyPropertyData = { ...propertyData };
+    delete legacyPropertyData.safetyculture_checklist_url;
+
+    if (editingPropertyId) {
+      result = await supabaseClient
+        .from("properties")
+        .update(legacyPropertyData)
+        .eq("id", editingPropertyId);
+    } else {
+      result = await supabaseClient
+        .from("properties")
+        .insert([legacyPropertyData]);
+    }
   }
 
   if (result.error) {
@@ -2607,6 +2702,9 @@ function clearPropertyForm() {
   }
   propertyAddress.value = "";
   propertyIcal.value = "";
+  if (safetycultureChecklistUrl) {
+    safetycultureChecklistUrl.value = "";
+  }
   standardDay.value = "Wednesday";
   coverageDays.value = 1;
   if (coverageRule) {
@@ -4045,6 +4143,7 @@ function renderTaskCard(task) {
         <div><strong>Status:</strong> <span class="status-badge ${badgeClass}">${status}</span></div>
       </div>
       <div class="task-card-actions">
+        ${getSafetyCultureTaskActionMarkup(task)}
         <button onclick="openEditCleaning('${task.id}')">Edit</button>
         ${status !== "Completed" && status !== "In Progress" ? `<button onclick="startCleaningTask('${task.id}')">Start</button>` : ""}
         ${status !== "Completed" ? `<button onclick="markCleaningComplete('${task.id}')">Complete</button>` : ""}
@@ -4301,6 +4400,7 @@ function renderWeekViewListTaskCard(task) {
       ${task.notes ? `<div class="task-line"><small>Notes: ${stripManualBillingOverrideTag(task.notes)}</small></div>` : ""}
       ${task.completed_at ? `<div class="task-line"><small>Completed: ${new Date(task.completed_at).toLocaleString()}</small></div>` : ""}
       <div class="task-buttons">
+        ${getSafetyCultureTaskActionMarkup(task)}
         <button onclick="openEditCleaning('${task.id}')">Edit</button>
         ${!isCompleted && !isInProgress ? `<button onclick="startCleaningTask('${task.id}')">Start</button>` : ""}
         ${!isCompleted ? `<button onclick="markCleaningComplete('${task.id}')">Complete</button>` : ""}
@@ -4587,6 +4687,7 @@ function renderProperties() {
               ${task.check_in_date ? `<div class="task-line"><small>Prior to check-in: ${task.check_in_date}</small></div>` : ""}
               ${task.notes ? `<div class="task-line"><small>Notes: ${stripManualBillingOverrideTag(task.notes)}</small></div>` : ""}
               <div class="task-buttons">
+                ${getSafetyCultureTaskActionMarkup(task)}
                 <button onclick="openEditCleaning('${task.id}')">Edit</button>
                 ${task.status !== "Completed" ? `<button onclick="markCleaningComplete('${task.id}')">Complete</button>` : ""}
                 <button class="delete-btn" onclick="deleteCleaningTask('${task.id}')">Delete</button>
@@ -4608,6 +4709,7 @@ function renderProperties() {
         <div class="property-meta">
           <div><strong>Client Name:</strong> ${property.client_name || ""}</div>
           <div><strong>Address:</strong> ${property.address || "Not entered"}</div>
+          <div><strong>SafetyCulture Checklist:</strong> ${property.safetyculture_checklist_url ? "Saved" : "Not entered"}</div>
           <div><strong>Standard Service Day:</strong> ${property.standard_service_day || "Wednesday"}</div>
           <div><strong>Guest Ready Coverage Rule:</strong> ${getCoverageRuleLabel(getCoverageRuleForProperty(property))}</div>
           <div><strong>Billable Guest Ready Charge:</strong> $${Number(property.default_off_cycle_charge ?? 65).toFixed(2)}</div>
