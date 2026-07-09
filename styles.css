@@ -1874,6 +1874,81 @@ textarea{
     max-width: 680px;
 }
 
+.settings-subsection-header {
+    margin-top: 20px;
+}
+
+.chemical-settings-card {
+    max-width: 100%;
+}
+
+.chemical-settings-form-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(180px, 1fr));
+    gap: 12px;
+}
+
+.chemical-settings-active-toggle {
+    margin-top: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    color: #334155;
+    font-weight: 600;
+}
+
+.chemical-settings-active-toggle input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+}
+
+.chemical-settings-actions {
+    flex-wrap: wrap;
+}
+
+.chemical-settings-table-wrap {
+    margin-top: 14px;
+    overflow-x: auto;
+}
+
+.chemical-settings-table {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 680px;
+}
+
+.chemical-settings-table th,
+.chemical-settings-table td {
+    border-bottom: 1px solid #e5e7eb;
+    text-align: left;
+    padding: 8px;
+    vertical-align: top;
+    font-size: 13px;
+}
+
+.chemical-settings-table th {
+    background: #f8fafc;
+    font-weight: 700;
+    color: #0f172a;
+}
+
+.chemical-settings-row-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.chemical-settings-row-actions button {
+    padding: 7px 10px;
+    font-size: 12px;
+}
+
+.chemical-settings-row-actions button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
 .settings-actions {
     display: flex;
     align-items: center;
@@ -1982,6 +2057,16 @@ textarea{
     align-items: center;
     gap: 12px;
     margin-top: 12px;
+}
+
+@media (max-width: 900px) {
+    .chemical-settings-form-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .chemical-settings-table {
+        min-width: 560px;
+    }
 }
 
 .messages-tech-card {

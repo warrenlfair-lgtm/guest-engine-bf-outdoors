@@ -3,6 +3,7 @@ let cleaningTasks = [];
 let reservations = [];
 let operationsReminders = [];
 let chemicalUsageEntries = [];
+let chemicals = [];
 
 const DEFAULT_COMPANY_PROFILE = {
   company_name: "Guest Ready™",
@@ -21,7 +22,9 @@ let editingCleaningId = null;
 let editingReminderPropertyId = null;
 let editingReminderId = null;
 let editingChemicalUsageId = null;
+let editingChemicalSettingId = null;
 let cleaningModalInitialState = null;
+let isChemicalNameChangeListenerAttached = false;
 
 let selectedPropertyFilter = "";
 let selectedMonthFilter = "current";
@@ -40,22 +43,22 @@ const PROTECTED_VIEWS = new Set(["reports"]);
 let isProtectedAccessUnlocked = false;
 let pinModalResolver = null;
 const MANUAL_BILLING_OVERRIDE_TAG = "[Manual Override]";
-const CHEMICAL_NAME_OPTIONS = [
-  "Liquid Chlorine",
-  "Chlorine Tablets",
-  "pH Up",
-  "pH Down",
-  "Alkalinity Up",
-  "Alkalinity Down",
-  "Stabilizer / CYA",
-  "Calcium Hardness Increaser",
-  "Algaecide",
-  "Clarifier",
-  "Phosphate Remover",
-  "Salt",
-  "Other",
-];
 const CHEMICAL_UNIT_OPTIONS = ["gallons", "pounds", "ounces", "tablets", "bags", "quarts"];
+const DEFAULT_CHEMICAL_CATALOG = [
+  { name: "Liquid Chlorine", default_unit: "gallons" },
+  { name: "Chlorine Tablets", default_unit: "tablets" },
+  { name: "pH Up", default_unit: "pounds" },
+  { name: "pH Down", default_unit: "pounds" },
+  { name: "Alkalinity Up", default_unit: "pounds" },
+  { name: "Alkalinity Down", default_unit: "pounds" },
+  { name: "Stabilizer / CYA", default_unit: "pounds" },
+  { name: "Calcium Hardness Increaser", default_unit: "pounds" },
+  { name: "Algaecide", default_unit: "quarts" },
+  { name: "Clarifier", default_unit: "quarts" },
+  { name: "Phosphate Remover", default_unit: "quarts" },
+  { name: "Salt", default_unit: "bags" },
+  { name: "Other", default_unit: "" },
+];
 
 const addPropertyBtn = document.getElementById("addPropertyBtn");
 const propertyModal = document.getElementById("propertyModal");
@@ -162,6 +165,13 @@ const confirmAdminPinInput = document.getElementById("confirmAdminPinInput");
 const saveCompanyProfileBtn = document.getElementById("saveCompanyProfileBtn");
 const settingsStatus = document.getElementById("settingsStatus");
 const companyLogoUploadFeature = document.getElementById("companyLogoUploadFeature");
+const chemicalSettingNameInput = document.getElementById("chemicalSettingNameInput");
+const chemicalSettingDefaultUnitSelect = document.getElementById("chemicalSettingDefaultUnitSelect");
+const chemicalSettingActiveCheckbox = document.getElementById("chemicalSettingActiveCheckbox");
+const saveChemicalSettingBtn = document.getElementById("saveChemicalSettingBtn");
+const cancelChemicalSettingEditBtn = document.getElementById("cancelChemicalSettingEditBtn");
+const chemicalSettingsList = document.getElementById("chemicalSettingsList");
+const chemicalSettingsStatus = document.getElementById("chemicalSettingsStatus");
 
 const COMPANY_LOGO_BUCKET = "company-logos";
 
@@ -335,6 +345,14 @@ if (saveCompanyProfileBtn) {
   saveCompanyProfileBtn.addEventListener("click", saveCompanyProfile);
 }
 
+if (saveChemicalSettingBtn) {
+  saveChemicalSettingBtn.addEventListener("click", saveChemicalSetting);
+}
+
+if (cancelChemicalSettingEditBtn) {
+  cancelChemicalSettingEditBtn.addEventListener("click", resetChemicalSettingsForm);
+}
+
 if (companyLogoUrlInput) {
   companyLogoUrlInput.addEventListener("input", () => {
     renderCompanyLogoPreview(companyLogoUrlInput.value);
@@ -350,6 +368,7 @@ initializeBillingReportFilters();
 initializeRouteFragmentationFilters();
 initializeChemicalReportFilters();
 initializeMessagesDefaults();
+initializeChemicalSettingsForm();
 initializeChemicalUsageOptions();
 loadData();
 
@@ -398,18 +417,111 @@ function initializeMessagesDefaults() {
   }
 }
 
-function initializeChemicalUsageOptions() {
-  if (chemicalNameSelect) {
-    chemicalNameSelect.innerHTML = CHEMICAL_NAME_OPTIONS
-      .map((name) => `<option value="${name}">${name}</option>`)
-      .join("");
+function getChemicalsFallbackList() {
+  return DEFAULT_CHEMICAL_CATALOG.map((item, index) => ({
+    id: `default-${index + 1}`,
+    company_id: null,
+    name: item.name,
+    default_unit: item.default_unit || null,
+    active: true,
+  }));
+}
+
+function getActiveChemicals() {
+  return chemicals.filter((chemical) => chemical.active !== false);
+}
+
+function getChemicalByName(name) {
+  const normalized = String(name || "").trim().toLowerCase();
+  if (!normalized) return null;
+  return chemicals.find((chemical) => String(chemical.name || "").trim().toLowerCase() === normalized) || null;
+}
+
+function getChemicalNamesFromUsageEntries() {
+  return Array.from(new Set(
+    chemicalUsageEntries
+      .map((entry) => String(entry.chemical_name || "").trim())
+      .filter(Boolean)
+  )).sort((a, b) => a.localeCompare(b));
+}
+
+function buildChemicalUsageNameOptions(selectedName = "") {
+  const names = getActiveChemicals().map((chemical) => chemical.name);
+  const chosen = String(selectedName || "").trim();
+  if (chosen && !names.includes(chosen)) {
+    names.push(chosen);
+  }
+  return names.sort((a, b) => a.localeCompare(b));
+}
+
+function buildChemicalUnitOptionsMarkup(selectedUnit = "") {
+  const selected = String(selectedUnit || "").trim();
+  const units = ["", ...CHEMICAL_UNIT_OPTIONS];
+  if (selected && !units.includes(selected)) {
+    units.push(selected);
   }
 
-  if (chemicalUnitSelect) {
-    chemicalUnitSelect.innerHTML = CHEMICAL_UNIT_OPTIONS
-      .map((unit) => `<option value="${unit}">${unit}</option>`)
-      .join("");
+  return units.map((unit) => {
+    const label = unit || "No default";
+    const selectedAttr = unit === selected ? " selected" : "";
+    return `<option value="${unit}"${selectedAttr}>${label}</option>`;
+  }).join("");
+}
+
+function renderChemicalNameOptions(selectedName = "") {
+  if (!chemicalNameSelect) return;
+  const options = buildChemicalUsageNameOptions(selectedName);
+
+  if (!options.length) {
+    chemicalNameSelect.innerHTML = "<option value=\"\">No active chemicals configured</option>";
+    chemicalNameSelect.value = "";
+    return;
   }
+
+  chemicalNameSelect.innerHTML = options
+    .map((name) => `<option value="${name}">${name}</option>`)
+    .join("");
+
+  if (selectedName && options.includes(selectedName)) {
+    chemicalNameSelect.value = selectedName;
+  } else {
+    chemicalNameSelect.value = options[0];
+  }
+}
+
+function renderChemicalUnitOptions(selectedUnit = "") {
+  if (!chemicalUnitSelect) return;
+  chemicalUnitSelect.innerHTML = buildChemicalUnitOptionsMarkup(selectedUnit);
+  chemicalUnitSelect.value = String(selectedUnit || "").trim();
+}
+
+function applyChemicalDefaultUnitForSelection(options = {}) {
+  if (!chemicalNameSelect || !chemicalUnitSelect) return;
+  const force = options.force === true;
+  const selectedChemical = getChemicalByName(chemicalNameSelect.value);
+  const defaultUnit = String(selectedChemical?.default_unit || "").trim();
+
+  if (!defaultUnit) return;
+  if (!force && String(chemicalUnitSelect.value || "").trim()) return;
+  chemicalUnitSelect.value = defaultUnit;
+}
+
+function initializeChemicalUsageOptions() {
+  renderChemicalNameOptions();
+  renderChemicalUnitOptions();
+
+  if (chemicalNameSelect && !isChemicalNameChangeListenerAttached) {
+    chemicalNameSelect.addEventListener("change", () => {
+      applyChemicalDefaultUnitForSelection({ force: true });
+    });
+    isChemicalNameChangeListenerAttached = true;
+  }
+}
+
+function initializeChemicalSettingsForm() {
+  if (!chemicalSettingDefaultUnitSelect) return;
+  chemicalSettingDefaultUnitSelect.innerHTML = buildChemicalUnitOptionsMarkup("");
+  resetChemicalSettingsForm();
 }
 
 function getCurrentCleaningTask() {
@@ -423,18 +535,15 @@ function canEditChemicalEntries() {
 
 function clearChemicalUsageForm() {
   editingChemicalUsageId = null;
-  if (chemicalNameSelect) {
-    chemicalNameSelect.value = CHEMICAL_NAME_OPTIONS[0];
-  }
+  renderChemicalNameOptions();
+  renderChemicalUnitOptions();
   if (chemicalQuantityInput) {
     chemicalQuantityInput.value = "";
-  }
-  if (chemicalUnitSelect) {
-    chemicalUnitSelect.value = CHEMICAL_UNIT_OPTIONS[0];
   }
   if (chemicalNotesInput) {
     chemicalNotesInput.value = "";
   }
+  applyChemicalDefaultUnitForSelection({ force: true });
 }
 
 function closeChemicalUsageModal() {
@@ -457,18 +566,18 @@ function openChemicalUsageModal(entryId = null) {
     if (!existingEntry) return;
 
     editingChemicalUsageId = existingEntry.id;
-    if (chemicalNameSelect) {
-      chemicalNameSelect.value = existingEntry.chemical_name || CHEMICAL_NAME_OPTIONS[0];
-    }
+    renderChemicalNameOptions(existingEntry.chemical_name || "");
     if (chemicalQuantityInput) {
       chemicalQuantityInput.value = existingEntry.quantity ?? "";
     }
-    if (chemicalUnitSelect) {
-      chemicalUnitSelect.value = existingEntry.unit || CHEMICAL_UNIT_OPTIONS[0];
-    }
+    renderChemicalUnitOptions(existingEntry.unit || "");
     if (chemicalNotesInput) {
       chemicalNotesInput.value = existingEntry.notes || "";
     }
+  } else {
+    renderChemicalNameOptions();
+    renderChemicalUnitOptions();
+    applyChemicalDefaultUnitForSelection({ force: true });
   }
 
   if (chemicalUsageModal) {
@@ -860,7 +969,10 @@ async function loadData() {
   await loadCleaningTasks();
   await loadReservations();
   await loadOperationsReminders();
+  await loadChemicals();
   await loadChemicalUsageEntries();
+  renderChemicalSettingsSection();
+  initializeChemicalUsageOptions();
   const monthForAutoGeneration = ["current", "next", "previous"].includes(selectedMonthFilter)
     ? selectedMonthFilter
     : "current";
@@ -879,6 +991,60 @@ async function loadData() {
     renderChemicalUsageReport();
   }
   renderMessagesPreview();
+}
+
+async function ensureDefaultChemicalsSeeded() {
+  const payload = DEFAULT_CHEMICAL_CATALOG.map((item) => ({
+    company_id: null,
+    name: item.name,
+    default_unit: item.default_unit || null,
+    active: true,
+  }));
+
+  const { error } = await supabaseClient
+    .from("chemicals")
+    .insert(payload);
+
+  if (error) {
+    const message = String(error.message || "").toLowerCase();
+    const duplicate = message.includes("duplicate") || message.includes("unique");
+    if (!duplicate) {
+      console.warn("Could not seed default chemicals:", error.message);
+    }
+  }
+}
+
+async function loadChemicals() {
+  const { data, error } = await supabaseClient
+    .from("chemicals")
+    .select("*")
+    .order("name", { ascending: true });
+
+  if (error) {
+    console.warn("Could not load chemicals from Supabase. Using fallback list:", error.message);
+    chemicals = getChemicalsFallbackList();
+    return;
+  }
+
+  const rows = data || [];
+  if (!rows.length) {
+    await ensureDefaultChemicalsSeeded();
+    const retry = await supabaseClient
+      .from("chemicals")
+      .select("*")
+      .order("name", { ascending: true });
+
+    if (retry.error) {
+      console.warn("Could not reload seeded chemicals. Using fallback list:", retry.error.message);
+      chemicals = getChemicalsFallbackList();
+      return;
+    }
+
+    chemicals = retry.data || [];
+    return;
+  }
+
+  chemicals = rows;
 }
 
 function getMondayStartForDate(dateString) {
@@ -1621,6 +1787,226 @@ async function saveCompanyProfile() {
       settingsStatus.textContent = "";
     }, 2500);
   }
+}
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function setChemicalSettingsStatus(message, isError = false) {
+  if (!chemicalSettingsStatus) return;
+  chemicalSettingsStatus.textContent = message || "";
+  chemicalSettingsStatus.style.color = isError ? "#dc2626" : "#059669";
+  if (!message) return;
+  setTimeout(() => {
+    if (chemicalSettingsStatus.textContent === message) {
+      chemicalSettingsStatus.textContent = "";
+    }
+  }, 2800);
+}
+
+function resetChemicalSettingsForm() {
+  editingChemicalSettingId = null;
+  if (chemicalSettingNameInput) {
+    chemicalSettingNameInput.value = "";
+  }
+  if (chemicalSettingDefaultUnitSelect) {
+    chemicalSettingDefaultUnitSelect.value = "";
+  }
+  if (chemicalSettingActiveCheckbox) {
+    chemicalSettingActiveCheckbox.checked = true;
+  }
+  if (saveChemicalSettingBtn) {
+    saveChemicalSettingBtn.textContent = "Add Chemical";
+  }
+  if (cancelChemicalSettingEditBtn) {
+    cancelChemicalSettingEditBtn.classList.add("hidden");
+  }
+}
+
+function getChemicalUsageCountForName(chemicalName) {
+  const target = String(chemicalName || "").trim().toLowerCase();
+  if (!target) return 0;
+  return chemicalUsageEntries.filter((entry) => String(entry.chemical_name || "").trim().toLowerCase() === target).length;
+}
+
+function renderChemicalSettingsSection() {
+  if (!chemicalSettingsList) return;
+
+  const rows = chemicals
+    .slice()
+    .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+
+  if (!rows.length) {
+    chemicalSettingsList.innerHTML = "<tr><td colspan=\"5\">No chemicals configured yet.</td></tr>";
+    return;
+  }
+
+  chemicalSettingsList.innerHTML = rows.map((chemical) => {
+    const usageCount = getChemicalUsageCountForName(chemical.name);
+    const canDelete = usageCount === 0;
+    const escapedName = escapeHtml(chemical.name || "");
+    const escapedUnit = escapeHtml(chemical.default_unit || "");
+
+    return `
+      <tr>
+        <td>${escapedName}</td>
+        <td>${escapedUnit || "-"}</td>
+        <td>${chemical.active === false ? "Inactive" : "Active"}</td>
+        <td>${usageCount}</td>
+        <td>
+          <div class="chemical-settings-row-actions">
+            <button type="button" onclick="openEditChemicalSetting('${chemical.id}')">Edit</button>
+            <button type="button" onclick="toggleChemicalActive('${chemical.id}')">${chemical.active === false ? "Activate" : "Deactivate"}</button>
+            <button type="button" class="delete-btn" onclick="deleteChemicalSetting('${chemical.id}')" ${canDelete ? "" : "disabled"}>Delete</button>
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join("");
+}
+
+function openEditChemicalSetting(chemicalId) {
+  const chemical = chemicals.find((item) => item.id === chemicalId);
+  if (!chemical) return;
+
+  editingChemicalSettingId = chemicalId;
+  if (chemicalSettingNameInput) {
+    chemicalSettingNameInput.value = chemical.name || "";
+  }
+  if (chemicalSettingDefaultUnitSelect) {
+    const normalizedUnit = String(chemical.default_unit || "").trim();
+    chemicalSettingDefaultUnitSelect.value = CHEMICAL_UNIT_OPTIONS.includes(normalizedUnit) ? normalizedUnit : "";
+  }
+  if (chemicalSettingActiveCheckbox) {
+    chemicalSettingActiveCheckbox.checked = chemical.active !== false;
+  }
+  if (saveChemicalSettingBtn) {
+    saveChemicalSettingBtn.textContent = "Update Chemical";
+  }
+  if (cancelChemicalSettingEditBtn) {
+    cancelChemicalSettingEditBtn.classList.remove("hidden");
+  }
+}
+
+async function saveChemicalSetting() {
+  if (!chemicalSettingNameInput || !chemicalSettingDefaultUnitSelect || !chemicalSettingActiveCheckbox) return;
+
+  const name = String(chemicalSettingNameInput.value || "").trim();
+  const defaultUnit = String(chemicalSettingDefaultUnitSelect.value || "").trim() || null;
+  const active = Boolean(chemicalSettingActiveCheckbox.checked);
+
+  if (!name) {
+    alert("Chemical name is required.");
+    return;
+  }
+
+  const duplicate = chemicals.find((chemical) => {
+    const sameName = String(chemical.name || "").trim().toLowerCase() === name.toLowerCase();
+    if (!sameName) return false;
+    if (!editingChemicalSettingId) return true;
+    return chemical.id !== editingChemicalSettingId;
+  });
+
+  if (duplicate) {
+    alert("A chemical with this name already exists.");
+    return;
+  }
+
+  const payload = {
+    company_id: null,
+    name,
+    default_unit: defaultUnit,
+    active,
+  };
+
+  let response;
+  if (editingChemicalSettingId) {
+    response = await supabaseClient
+      .from("chemicals")
+      .update(payload)
+      .eq("id", editingChemicalSettingId);
+  } else {
+    response = await supabaseClient
+      .from("chemicals")
+      .insert([payload]);
+  }
+
+  if (response.error) {
+    alert("Error saving chemical: " + response.error.message);
+    return;
+  }
+
+  await loadChemicals();
+  resetChemicalSettingsForm();
+  renderChemicalSettingsSection();
+  initializeChemicalUsageOptions();
+  renderChemicalUsageReport();
+  renderProperties();
+  setChemicalSettingsStatus("Chemical settings saved.");
+}
+
+async function toggleChemicalActive(chemicalId) {
+  const chemical = chemicals.find((item) => item.id === chemicalId);
+  if (!chemical) return;
+
+  const nextActive = chemical.active === false;
+  const { error } = await supabaseClient
+    .from("chemicals")
+    .update({ active: nextActive })
+    .eq("id", chemicalId);
+
+  if (error) {
+    alert("Error updating chemical status: " + error.message);
+    return;
+  }
+
+  await loadChemicals();
+  renderChemicalSettingsSection();
+  initializeChemicalUsageOptions();
+  setChemicalSettingsStatus(nextActive ? "Chemical activated." : "Chemical deactivated.");
+}
+
+async function deleteChemicalSetting(chemicalId) {
+  const chemical = chemicals.find((item) => item.id === chemicalId);
+  if (!chemical) return;
+
+  const { count, error: countError } = await supabaseClient
+    .from("chemical_usage")
+    .select("id", { count: "exact", head: true })
+    .eq("chemical_name", chemical.name);
+
+  if (countError) {
+    alert("Could not verify chemical usage before delete: " + countError.message);
+    return;
+  }
+
+  if (Number(count || 0) > 0) {
+    alert("This chemical has usage history and cannot be deleted. Set it inactive instead.");
+    return;
+  }
+
+  if (!confirm(`Delete chemical \"${chemical.name}\"?`)) return;
+
+  const { error } = await supabaseClient
+    .from("chemicals")
+    .delete()
+    .eq("id", chemicalId);
+
+  if (error) {
+    alert("Error deleting chemical: " + error.message);
+    return;
+  }
+
+  await loadChemicals();
+  renderChemicalSettingsSection();
+  initializeChemicalUsageOptions();
+  setChemicalSettingsStatus("Chemical deleted.");
 }
 
 async function loadProperties() {
@@ -2764,7 +3150,8 @@ function renderChemicalUsageReport() {
     chemicalReportPropertySelect.value = previousValue;
   }
 
-  const chemicalTypeOptions = `<option value="">All Chemicals</option>${CHEMICAL_NAME_OPTIONS
+  const chemicalFilterNames = getChemicalNamesFromUsageEntries();
+  const chemicalTypeOptions = `<option value="">All Chemicals</option>${chemicalFilterNames
     .map((name) => `<option value="${name}">${name}</option>`)
     .join("")}`;
 
@@ -3890,7 +4277,7 @@ function renderPropertyChemicalHistory(property) {
     .filter((entry) => !filters.chemicalName || String(entry.chemical_name || "") === filters.chemicalName)
     .sort((a, b) => String(b.service_date || "").localeCompare(String(a.service_date || "")));
 
-  const chemicalOptions = `<option value="">All Chemicals</option>${CHEMICAL_NAME_OPTIONS
+  const chemicalOptions = `<option value="">All Chemicals</option>${getChemicalNamesFromUsageEntries()
     .map((name) => `<option value="${name}" ${filters.chemicalName === name ? "selected" : ""}>${name}</option>`)
     .join("")}`;
 
