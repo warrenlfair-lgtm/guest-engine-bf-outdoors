@@ -45,19 +45,19 @@ let pinModalResolver = null;
 const MANUAL_BILLING_OVERRIDE_TAG = "[Manual Override]";
 const CHEMICAL_UNIT_OPTIONS = ["gallons", "pounds", "ounces", "tablets", "bags", "quarts"];
 const DEFAULT_CHEMICAL_CATALOG = [
-  { name: "Liquid Chlorine", default_unit: "gallons" },
-  { name: "Chlorine Tablets", default_unit: "tablets" },
-  { name: "pH Up", default_unit: "pounds" },
-  { name: "pH Down", default_unit: "pounds" },
-  { name: "Alkalinity Up", default_unit: "pounds" },
-  { name: "Alkalinity Down", default_unit: "pounds" },
-  { name: "Stabilizer / CYA", default_unit: "pounds" },
-  { name: "Calcium Hardness Increaser", default_unit: "pounds" },
-  { name: "Algaecide", default_unit: "quarts" },
-  { name: "Clarifier", default_unit: "quarts" },
-  { name: "Phosphate Remover", default_unit: "quarts" },
-  { name: "Salt", default_unit: "bags" },
-  { name: "Other", default_unit: "" },
+  { name: "Liquid Chlorine", default_unit: "gallons", cost_per_unit: 0, billable_rate_per_unit: 0, is_billable: true },
+  { name: "Chlorine Tablets", default_unit: "tablets", cost_per_unit: 0, billable_rate_per_unit: 0, is_billable: true },
+  { name: "pH Up", default_unit: "pounds", cost_per_unit: 0, billable_rate_per_unit: 0, is_billable: true },
+  { name: "pH Down", default_unit: "pounds", cost_per_unit: 0, billable_rate_per_unit: 0, is_billable: true },
+  { name: "Alkalinity Up", default_unit: "pounds", cost_per_unit: 0, billable_rate_per_unit: 0, is_billable: true },
+  { name: "Alkalinity Down", default_unit: "pounds", cost_per_unit: 0, billable_rate_per_unit: 0, is_billable: true },
+  { name: "Stabilizer / CYA", default_unit: "pounds", cost_per_unit: 0, billable_rate_per_unit: 0, is_billable: true },
+  { name: "Calcium Hardness Increaser", default_unit: "pounds", cost_per_unit: 0, billable_rate_per_unit: 0, is_billable: true },
+  { name: "Algaecide", default_unit: "quarts", cost_per_unit: 0, billable_rate_per_unit: 0, is_billable: true },
+  { name: "Clarifier", default_unit: "quarts", cost_per_unit: 0, billable_rate_per_unit: 0, is_billable: true },
+  { name: "Phosphate Remover", default_unit: "quarts", cost_per_unit: 0, billable_rate_per_unit: 0, is_billable: true },
+  { name: "Salt", default_unit: "bags", cost_per_unit: 0, billable_rate_per_unit: 0, is_billable: true },
+  { name: "Other", default_unit: "", cost_per_unit: 0, billable_rate_per_unit: 0, is_billable: true },
 ];
 
 const addPropertyBtn = document.getElementById("addPropertyBtn");
@@ -168,6 +168,9 @@ const companyLogoUploadFeature = document.getElementById("companyLogoUploadFeatu
 const chemicalSettingNameInput = document.getElementById("chemicalSettingNameInput");
 const chemicalSettingDefaultUnitSelect = document.getElementById("chemicalSettingDefaultUnitSelect");
 const chemicalSettingActiveCheckbox = document.getElementById("chemicalSettingActiveCheckbox");
+const chemicalSettingCostInput = document.getElementById("chemicalSettingCostInput");
+const chemicalSettingBillableRateInput = document.getElementById("chemicalSettingBillableRateInput");
+const chemicalSettingBillableCheckbox = document.getElementById("chemicalSettingBillableCheckbox");
 const saveChemicalSettingBtn = document.getElementById("saveChemicalSettingBtn");
 const cancelChemicalSettingEditBtn = document.getElementById("cancelChemicalSettingEditBtn");
 const chemicalSettingsList = document.getElementById("chemicalSettingsList");
@@ -417,6 +420,19 @@ function initializeMessagesDefaults() {
   }
 }
 
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function toMoney(value) {
+  return `$${Number(value || 0).toFixed(2)}`;
+}
+
 function getChemicalsFallbackList() {
   return DEFAULT_CHEMICAL_CATALOG.map((item, index) => ({
     id: `default-${index + 1}`,
@@ -424,6 +440,9 @@ function getChemicalsFallbackList() {
     name: item.name,
     default_unit: item.default_unit || null,
     active: true,
+    cost_per_unit: Number(item.cost_per_unit || 0),
+    billable_rate_per_unit: Number(item.billable_rate_per_unit || 0),
+    is_billable: item.is_billable !== false,
   }));
 }
 
@@ -437,12 +456,37 @@ function getChemicalByName(name) {
   return chemicals.find((chemical) => String(chemical.name || "").trim().toLowerCase() === normalized) || null;
 }
 
+function getChemicalById(chemicalId) {
+  const normalized = String(chemicalId || "").trim();
+  if (!normalized) return null;
+  return chemicals.find((chemical) => String(chemical.id || "") === normalized) || null;
+}
+
+function getChemicalCatalogItemForEntry(entry) {
+  const byId = getChemicalById(entry?.chemical_id);
+  if (byId) return byId;
+  return getChemicalByName(entry?.chemical_name);
+}
+
 function getChemicalNamesFromUsageEntries() {
   return Array.from(new Set(
     chemicalUsageEntries
       .map((entry) => String(entry.chemical_name || "").trim())
       .filter(Boolean)
   )).sort((a, b) => a.localeCompare(b));
+}
+
+function getChemicalChargeContext(entry) {
+  const quantity = Number(entry?.quantity || 0);
+  const catalogItem = getChemicalCatalogItemForEntry(entry);
+  const isBillable = catalogItem ? catalogItem.is_billable !== false : false;
+  const rate = isBillable ? Number(catalogItem?.billable_rate_per_unit || 0) : 0;
+  const charge = quantity > 0 && rate > 0 ? quantity * rate : 0;
+  return {
+    isBillable,
+    rate: Number.isFinite(rate) ? rate : 0,
+    charge: Number.isFinite(charge) ? charge : 0,
+  };
 }
 
 function buildChemicalUsageNameOptions(selectedName = "") {
@@ -999,6 +1043,9 @@ async function ensureDefaultChemicalsSeeded() {
     name: item.name,
     default_unit: item.default_unit || null,
     active: true,
+    cost_per_unit: Number(item.cost_per_unit || 0),
+    billable_rate_per_unit: Number(item.billable_rate_per_unit || 0),
+    is_billable: item.is_billable !== false,
   }));
 
   const { error } = await supabaseClient
@@ -1111,18 +1158,25 @@ async function saveChemicalUsageEntry() {
   const property = properties.find((item) => item.id === task.property_id);
   const propertyName = property?.property_name || task.property_name || "Unknown Property";
   const serviceDate = cleaningDate?.value || task.service_date || task.scheduled_date;
+  const selectedChemical = getChemicalByName(chemicalName);
 
   const payload = {
     task_id: task.id,
     property_id: task.property_id,
     property_name: propertyName,
     service_date: serviceDate,
+    chemical_id: selectedChemical?.id || null,
     chemical_name: chemicalName,
     quantity,
     unit,
     notes: notes || null,
     created_by: String(task.technician || cleaningTechnician?.value || "Tech").trim() || "Tech",
   };
+
+  const savePayloadWithoutChemicalId = (() => {
+    const { chemical_id, ...legacyPayload } = payload;
+    return legacyPayload;
+  })();
 
   let response;
   if (editingChemicalUsageId) {
@@ -1134,6 +1188,20 @@ async function saveChemicalUsageEntry() {
     response = await supabaseClient
       .from("chemical_usage")
       .insert([payload]);
+  }
+
+  const chemicalIdMissing = String(response?.error?.message || "").toLowerCase().includes("chemical_id");
+  if (response.error && chemicalIdMissing) {
+    if (editingChemicalUsageId) {
+      response = await supabaseClient
+        .from("chemical_usage")
+        .update(savePayloadWithoutChemicalId)
+        .eq("id", editingChemicalUsageId);
+    } else {
+      response = await supabaseClient
+        .from("chemical_usage")
+        .insert([savePayloadWithoutChemicalId]);
+    }
   }
 
   if (response.error) {
@@ -1789,15 +1857,6 @@ async function saveCompanyProfile() {
   }
 }
 
-function escapeHtml(value) {
-  return String(value || "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/\"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
 function setChemicalSettingsStatus(message, isError = false) {
   if (!chemicalSettingsStatus) return;
   chemicalSettingsStatus.textContent = message || "";
@@ -1812,27 +1871,24 @@ function setChemicalSettingsStatus(message, isError = false) {
 
 function resetChemicalSettingsForm() {
   editingChemicalSettingId = null;
-  if (chemicalSettingNameInput) {
-    chemicalSettingNameInput.value = "";
-  }
-  if (chemicalSettingDefaultUnitSelect) {
-    chemicalSettingDefaultUnitSelect.value = "";
-  }
-  if (chemicalSettingActiveCheckbox) {
-    chemicalSettingActiveCheckbox.checked = true;
-  }
-  if (saveChemicalSettingBtn) {
-    saveChemicalSettingBtn.textContent = "Add Chemical";
-  }
-  if (cancelChemicalSettingEditBtn) {
-    cancelChemicalSettingEditBtn.classList.add("hidden");
-  }
+  if (chemicalSettingNameInput) chemicalSettingNameInput.value = "";
+  if (chemicalSettingDefaultUnitSelect) chemicalSettingDefaultUnitSelect.value = "";
+  if (chemicalSettingActiveCheckbox) chemicalSettingActiveCheckbox.checked = true;
+  if (chemicalSettingCostInput) chemicalSettingCostInput.value = "0";
+  if (chemicalSettingBillableRateInput) chemicalSettingBillableRateInput.value = "0";
+  if (chemicalSettingBillableCheckbox) chemicalSettingBillableCheckbox.checked = true;
+  if (saveChemicalSettingBtn) saveChemicalSettingBtn.textContent = "Add Chemical";
+  if (cancelChemicalSettingEditBtn) cancelChemicalSettingEditBtn.classList.add("hidden");
 }
 
-function getChemicalUsageCountForName(chemicalName) {
-  const target = String(chemicalName || "").trim().toLowerCase();
-  if (!target) return 0;
-  return chemicalUsageEntries.filter((entry) => String(entry.chemical_name || "").trim().toLowerCase() === target).length;
+function getChemicalUsageCountForRecord(chemical) {
+  const targetId = String(chemical?.id || "").trim();
+  const targetName = String(chemical?.name || "").trim().toLowerCase();
+  return chemicalUsageEntries.filter((entry) => {
+    const matchesId = targetId && String(entry.chemical_id || "").trim() === targetId;
+    const matchesName = targetName && String(entry.chemical_name || "").trim().toLowerCase() === targetName;
+    return matchesId || matchesName;
+  }).length;
 }
 
 function renderChemicalSettingsSection() {
@@ -1843,21 +1899,27 @@ function renderChemicalSettingsSection() {
     .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
 
   if (!rows.length) {
-    chemicalSettingsList.innerHTML = "<tr><td colspan=\"5\">No chemicals configured yet.</td></tr>";
+    chemicalSettingsList.innerHTML = "<tr><td colspan=\"8\">No chemicals configured yet.</td></tr>";
     return;
   }
 
   chemicalSettingsList.innerHTML = rows.map((chemical) => {
-    const usageCount = getChemicalUsageCountForName(chemical.name);
+    const usageCount = getChemicalUsageCountForRecord(chemical);
     const canDelete = usageCount === 0;
     const escapedName = escapeHtml(chemical.name || "");
     const escapedUnit = escapeHtml(chemical.default_unit || "");
+    const costPerUnit = Number(chemical.cost_per_unit || 0);
+    const billableRate = Number(chemical.billable_rate_per_unit || 0);
+    const isBillable = chemical.is_billable !== false;
 
     return `
       <tr>
         <td>${escapedName}</td>
         <td>${escapedUnit || "-"}</td>
         <td>${chemical.active === false ? "Inactive" : "Active"}</td>
+        <td>${toMoney(costPerUnit)}</td>
+        <td>${toMoney(isBillable ? billableRate : 0)}</td>
+        <td>${isBillable ? "Yes" : "No"}</td>
         <td>${usageCount}</td>
         <td>
           <div class="chemical-settings-row-actions">
@@ -1876,33 +1938,38 @@ function openEditChemicalSetting(chemicalId) {
   if (!chemical) return;
 
   editingChemicalSettingId = chemicalId;
-  if (chemicalSettingNameInput) {
-    chemicalSettingNameInput.value = chemical.name || "";
-  }
+  if (chemicalSettingNameInput) chemicalSettingNameInput.value = chemical.name || "";
   if (chemicalSettingDefaultUnitSelect) {
     const normalizedUnit = String(chemical.default_unit || "").trim();
     chemicalSettingDefaultUnitSelect.value = CHEMICAL_UNIT_OPTIONS.includes(normalizedUnit) ? normalizedUnit : "";
   }
-  if (chemicalSettingActiveCheckbox) {
-    chemicalSettingActiveCheckbox.checked = chemical.active !== false;
-  }
-  if (saveChemicalSettingBtn) {
-    saveChemicalSettingBtn.textContent = "Update Chemical";
-  }
-  if (cancelChemicalSettingEditBtn) {
-    cancelChemicalSettingEditBtn.classList.remove("hidden");
-  }
+  if (chemicalSettingActiveCheckbox) chemicalSettingActiveCheckbox.checked = chemical.active !== false;
+  if (chemicalSettingCostInput) chemicalSettingCostInput.value = String(Number(chemical.cost_per_unit || 0));
+  if (chemicalSettingBillableRateInput) chemicalSettingBillableRateInput.value = String(Number(chemical.billable_rate_per_unit || 0));
+  if (chemicalSettingBillableCheckbox) chemicalSettingBillableCheckbox.checked = chemical.is_billable !== false;
+  if (saveChemicalSettingBtn) saveChemicalSettingBtn.textContent = "Update Chemical";
+  if (cancelChemicalSettingEditBtn) cancelChemicalSettingEditBtn.classList.remove("hidden");
 }
 
 async function saveChemicalSetting() {
-  if (!chemicalSettingNameInput || !chemicalSettingDefaultUnitSelect || !chemicalSettingActiveCheckbox) return;
+  if (!chemicalSettingNameInput || !chemicalSettingDefaultUnitSelect || !chemicalSettingActiveCheckbox || !chemicalSettingCostInput || !chemicalSettingBillableRateInput || !chemicalSettingBillableCheckbox) {
+    return;
+  }
 
   const name = String(chemicalSettingNameInput.value || "").trim();
   const defaultUnit = String(chemicalSettingDefaultUnitSelect.value || "").trim() || null;
   const active = Boolean(chemicalSettingActiveCheckbox.checked);
+  const costPerUnit = Math.max(0, Number(chemicalSettingCostInput.value || 0));
+  const billableRatePerUnit = Math.max(0, Number(chemicalSettingBillableRateInput.value || 0));
+  const isBillable = Boolean(chemicalSettingBillableCheckbox.checked);
 
   if (!name) {
     alert("Chemical name is required.");
+    return;
+  }
+
+  if (!Number.isFinite(costPerUnit) || !Number.isFinite(billableRatePerUnit)) {
+    alert("Enter valid numeric amounts for cost and billable rate.");
     return;
   }
 
@@ -1912,7 +1979,6 @@ async function saveChemicalSetting() {
     if (!editingChemicalSettingId) return true;
     return chemical.id !== editingChemicalSettingId;
   });
-
   if (duplicate) {
     alert("A chemical with this name already exists.");
     return;
@@ -1923,6 +1989,9 @@ async function saveChemicalSetting() {
     name,
     default_unit: defaultUnit,
     active,
+    cost_per_unit: costPerUnit,
+    billable_rate_per_unit: billableRatePerUnit,
+    is_billable: isBillable,
   };
 
   let response;
@@ -1935,6 +2004,29 @@ async function saveChemicalSetting() {
     response = await supabaseClient
       .from("chemicals")
       .insert([payload]);
+  }
+
+  if (response.error) {
+    const missingPricingColumns = /(cost_per_unit|billable_rate_per_unit|is_billable)/i.test(String(response.error.message || ""));
+    if (missingPricingColumns) {
+      const legacyPayload = {
+        company_id: null,
+        name,
+        default_unit: defaultUnit,
+        active,
+      };
+
+      if (editingChemicalSettingId) {
+        response = await supabaseClient
+          .from("chemicals")
+          .update(legacyPayload)
+          .eq("id", editingChemicalSettingId);
+      } else {
+        response = await supabaseClient
+          .from("chemicals")
+          .insert([legacyPayload]);
+      }
+    }
   }
 
   if (response.error) {
@@ -1976,10 +2068,20 @@ async function deleteChemicalSetting(chemicalId) {
   const chemical = chemicals.find((item) => item.id === chemicalId);
   if (!chemical) return;
 
-  const { count, error: countError } = await supabaseClient
+  let { count, error: countError } = await supabaseClient
     .from("chemical_usage")
     .select("id", { count: "exact", head: true })
-    .eq("chemical_name", chemical.name);
+    .or(`chemical_id.eq.${chemicalId},chemical_name.eq.${chemical.name}`);
+
+  const chemicalIdMissing = String(countError?.message || "").toLowerCase().includes("chemical_id");
+  if (countError && chemicalIdMissing) {
+    const fallback = await supabaseClient
+      .from("chemical_usage")
+      .select("id", { count: "exact", head: true })
+      .eq("chemical_name", chemical.name);
+    count = fallback.count;
+    countError = fallback.error;
+  }
 
   if (countError) {
     alert("Could not verify chemical usage before delete: " + countError.message);
@@ -3200,24 +3302,33 @@ function renderChemicalUsageReport() {
     return;
   }
 
-  const detailRows = rows.map((entry) => `
+  const detailRows = rows.map((entry) => {
+    const pricing = getChemicalChargeContext(entry);
+    return `
     <tr>
       <td>${entry.property_name || "Unknown Property"}</td>
       <td>${entry.service_date || "-"}</td>
       <td>${entry.chemical_name || "-"}</td>
       <td>${Number(entry.quantity || 0).toFixed(2).replace(/\.00$/, "")}</td>
       <td>${entry.unit || "-"}</td>
+      <td>${toMoney(pricing.rate)}</td>
+      <td>${toMoney(pricing.charge)}</td>
       <td>${entry.notes || ""}</td>
     </tr>
-  `).join("");
+  `;
+  }).join("");
 
   const totalsByProperty = new Map();
   const overallTotals = new Map();
+  const totalChargesByProperty = new Map();
+  const totalChargesByChemical = new Map();
+  let overallChargeTotal = 0;
 
   for (const entry of rows) {
+    const pricing = getChemicalChargeContext(entry);
     const propertyName = entry.property_name || "Unknown Property";
     const propertyKey = `${propertyName}|${entry.chemical_name || "Unknown"}|${entry.unit || "unit"}`;
-    const overallKey = `${entry.chemical_name || "Unknown"}|${entry.unit || "unit"}`;
+    const overallKey = `${entry.chemical_name || "Unknown"}`;
 
     totalsByProperty.set(propertyKey, {
       propertyName,
@@ -3226,11 +3337,23 @@ function renderChemicalUsageReport() {
       total: (totalsByProperty.get(propertyKey)?.total || 0) + Number(entry.quantity || 0),
     });
 
-    overallTotals.set(overallKey, {
+    overallTotals.set(`${entry.chemical_name || "Unknown"}|${entry.unit || "unit"}`, {
       chemicalName: entry.chemical_name || "Unknown",
       unit: entry.unit || "unit",
-      total: (overallTotals.get(overallKey)?.total || 0) + Number(entry.quantity || 0),
+      total: (overallTotals.get(`${entry.chemical_name || "Unknown"}|${entry.unit || "unit"}`)?.total || 0) + Number(entry.quantity || 0),
     });
+
+    totalChargesByProperty.set(
+      propertyName,
+      (totalChargesByProperty.get(propertyName) || 0) + pricing.charge
+    );
+
+    totalChargesByChemical.set(
+      overallKey,
+      (totalChargesByChemical.get(overallKey) || 0) + pricing.charge
+    );
+
+    overallChargeTotal += pricing.charge;
   }
 
   const groupedByPropertyName = new Map();
@@ -3260,6 +3383,16 @@ function renderChemicalUsageReport() {
     .map((item) => `<li>${item.chemicalName}: ${item.total.toFixed(2).replace(/\.00$/, "")} ${item.unit}</li>`)
     .join("");
 
+  const chargeTotalsByPropertyMarkup = Array.from(totalChargesByProperty.entries())
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([propertyName, total]) => `<li>${propertyName}: ${toMoney(total)}</li>`)
+    .join("");
+
+  const chargeTotalsByChemicalMarkup = Array.from(totalChargesByChemical.entries())
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([chemicalName, total]) => `<li>${chemicalName}: ${toMoney(total)}</li>`)
+    .join("");
+
   chemicalReportContainer.innerHTML = `
     <div class="billing-report-sheet chemical-report-sheet">
       ${renderBillingReportHeader()}
@@ -3279,6 +3412,8 @@ function renderChemicalUsageReport() {
               <th>Chemical</th>
               <th>Quantity</th>
               <th>Unit</th>
+              <th>Billable Rate</th>
+              <th>Chemical Charge</th>
               <th>Notes</th>
             </tr>
           </thead>
@@ -3300,6 +3435,22 @@ function renderChemicalUsageReport() {
         </ul>
       </section>
 
+      <section class="billing-report-group">
+        <h3>Total Chemical Charges By Property</h3>
+        <ul class="chemical-total-list">
+          ${chargeTotalsByPropertyMarkup}
+        </ul>
+      </section>
+
+      <section class="billing-report-group">
+        <h3>Total Chemical Charges By Chemical</h3>
+        <ul class="chemical-total-list">
+          ${chargeTotalsByChemicalMarkup}
+        </ul>
+      </section>
+
+      <div class="billing-report-grand-total">Overall Chemical Charges: ${toMoney(overallChargeTotal)}</div>
+
       ${renderBillingReportFooter()}
     </div>
   `;
@@ -3317,14 +3468,18 @@ async function shareChemicalUsageReport() {
     : "All Properties";
 
   const previewLines = rows.slice(0, 8).map((row) => {
-    return `${row.service_date} | ${row.property_name || "Unknown Property"} | ${row.chemical_name} ${Number(row.quantity || 0).toFixed(2).replace(/\.00$/, "")} ${row.unit}`;
+    const pricing = getChemicalChargeContext(row);
+    return `${row.service_date} | ${row.property_name || "Unknown Property"} | ${row.chemical_name} ${Number(row.quantity || 0).toFixed(2).replace(/\.00$/, "")} ${row.unit} | Rate ${toMoney(pricing.rate)} | Charge ${toMoney(pricing.charge)}`;
   });
+
+  const overallChargeTotal = rows.reduce((sum, row) => sum + getChemicalChargeContext(row).charge, 0);
 
   const text = [
     `${companyProfile.company_name} - Chemical Usage Report`,
     `Date Range: ${latestChemicalReportState.startDate} to ${latestChemicalReportState.endDate}`,
     `Property: ${selectedPropertyName}`,
     `Chemical: ${latestChemicalReportState.selectedChemical || "All Chemicals"}`,
+    `Overall Chemical Charges: ${toMoney(overallChargeTotal)}`,
     "",
     ...previewLines,
     rows.length > previewLines.length ? `...and ${rows.length - previewLines.length} more entries.` : "",

@@ -319,7 +319,7 @@
 
     <div class="view-header settings-subsection-header">
       <h2>Chemical Settings</h2>
-      <p>Manage your chemical inventory for task entry and reporting filters.</p>
+      <p>Manage chemical names, units, availability, and homeowner billing rates.</p>
     </div>
 
     <div class="settings-card chemical-settings-card">
@@ -333,12 +333,29 @@
           <label for="chemicalSettingDefaultUnitSelect">Default Unit</label>
           <select id="chemicalSettingDefaultUnitSelect"></select>
         </div>
+
+        <div>
+          <label for="chemicalSettingCostInput">Cost Per Unit</label>
+          <input id="chemicalSettingCostInput" type="number" min="0" step="0.01" value="0" placeholder="0.00">
+        </div>
+
+        <div>
+          <label for="chemicalSettingBillableRateInput">Billable Rate Per Unit</label>
+          <input id="chemicalSettingBillableRateInput" type="number" min="0" step="0.01" value="0" placeholder="0.00">
+        </div>
       </div>
 
-      <label class="chemical-settings-active-toggle" for="chemicalSettingActiveCheckbox">
-        <input id="chemicalSettingActiveCheckbox" type="checkbox" checked>
-        Active (shown in future chemical usage dropdowns)
-      </label>
+      <div class="chemical-settings-checkbox-row">
+        <label class="chemical-settings-active-toggle" for="chemicalSettingActiveCheckbox">
+          <input id="chemicalSettingActiveCheckbox" type="checkbox" checked>
+          Active (shown in future chemical usage dropdowns)
+        </label>
+
+        <label class="chemical-settings-active-toggle" for="chemicalSettingBillableCheckbox">
+          <input id="chemicalSettingBillableCheckbox" type="checkbox" checked>
+          Billable to homeowner
+        </label>
+      </div>
 
       <div class="settings-actions chemical-settings-actions">
         <button type="button" id="saveChemicalSettingBtn">Add Chemical</button>
@@ -353,6 +370,9 @@
               <th>Name</th>
               <th>Default Unit</th>
               <th>Status</th>
+              <th>Cost/Unit</th>
+              <th>Billable Rate/Unit</th>
+              <th>Billable</th>
               <th>Usage Count</th>
               <th>Actions</th>
             </tr>

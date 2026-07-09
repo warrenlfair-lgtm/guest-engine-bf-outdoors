@@ -1884,12 +1884,19 @@ textarea{
 
 .chemical-settings-form-grid {
     display: grid;
-    grid-template-columns: repeat(2, minmax(180px, 1fr));
+    grid-template-columns: repeat(2, minmax(200px, 1fr));
     gap: 12px;
 }
 
+.chemical-settings-checkbox-row {
+    margin-top: 12px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+}
+
 .chemical-settings-active-toggle {
-    margin-top: 14px;
+    margin-top: 0;
     display: flex;
     align-items: center;
     gap: 8px;
@@ -1915,7 +1922,7 @@ textarea{
 .chemical-settings-table {
     width: 100%;
     border-collapse: collapse;
-    min-width: 680px;
+    min-width: 860px;
 }
 
 .chemical-settings-table th,
@@ -2059,16 +2066,6 @@ textarea{
     margin-top: 12px;
 }
 
-@media (max-width: 900px) {
-    .chemical-settings-form-grid {
-        grid-template-columns: 1fr;
-    }
-
-    .chemical-settings-table {
-        min-width: 560px;
-    }
-}
-
 .messages-tech-card {
     border: 1px solid #e5e7eb;
     border-radius: 10px;
@@ -2095,6 +2092,16 @@ textarea{
     box-sizing: border-box;
     font-family: Consolas, "Courier New", monospace;
     line-height: 1.45;
+}
+
+@media (max-width: 900px) {
+    .chemical-settings-form-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .chemical-settings-table {
+        min-width: 620px;
+    }
 }
 
 .app-brand-footer {
