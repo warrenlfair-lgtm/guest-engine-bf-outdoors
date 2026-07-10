@@ -4211,6 +4211,48 @@ function logInvoiceTaskDebugInfo({ startDate, endDate, selectedPropertyId, selec
   });
 }
 
+function logClientCleaningAggregation({ taskItems, propertyIds = [], clientName = "" }) {
+  const propertyMap = new Map();
+  const allowedPropertyIds = new Set((propertyIds || []).map((id) => normalizePropertyId(id)));
+  let runningCleaningItemCount = 0;
+
+  taskItems.forEach((item) => {
+    const propertyKey = normalizePropertyId(item.propertyId);
+    if (allowedPropertyIds.size && !allowedPropertyIds.has(propertyKey)) return;
+
+    if (!propertyMap.has(propertyKey)) {
+      propertyMap.set(propertyKey, {
+        propertyName: item.propertyName || getPropertyName(item.propertyId),
+        chargeableTasksFound: 0,
+        cleaningInvoiceItemsCreated: 0,
+      });
+    }
+
+    const group = propertyMap.get(propertyKey);
+    group.chargeableTasksFound += 1;
+    group.cleaningInvoiceItemsCreated += 1;
+    runningCleaningItemCount += 1;
+
+    console.log("[Invoice Debug][Cleaning][Aggregation]", {
+      clientName,
+      propertyName: group.propertyName,
+      chargeableTasksFoundPerProperty: group.chargeableTasksFound,
+      cleaningInvoiceItemsCreatedPerProperty: group.cleaningInvoiceItemsCreated,
+      runningCleaningItemCount,
+    });
+  });
+
+  console.log("[Invoice Debug][Cleaning][Aggregation][Final]", {
+    clientName,
+    propertiesProcessed: Array.from(propertyMap.values()).map((row) => ({
+      propertyName: row.propertyName,
+      chargeableTasksFound: row.chargeableTasksFound,
+      cleaningInvoiceItemsCreated: row.cleaningInvoiceItemsCreated,
+    })),
+    finalCleaningItemCount: runningCleaningItemCount,
+  });
+}
+
 function getInvoiceCandidateTasks({ startDate, endDate, selectedPropertyId = "", selectedClientName = "", enableDebugLog = false }) {
   const billingRows = getBillingReportRowsForFilters({
     startDate,
@@ -4307,11 +4349,21 @@ function formatInvoiceDate(date) {
 
 function buildDraftInvoiceModel({ property, clientName = "", propertyIds = [], startDate, endDate, includeNonBillableChemicals = false, taxOverride = "property", enableDebugLog = false }) {
   const invoiceDate = formatInvoiceDate(new Date());
-  const selectedPropertyId = property?.id || (propertyIds.length === 1 ? propertyIds[0] : "");
+  const selectedPropertyId = !clientName && propertyIds.length <= 1
+    ? (property?.id || (propertyIds.length === 1 ? propertyIds[0] : ""))
+    : "";
   const selectedClientName = clientName || "";
   const taskDebug = getInvoiceTaskDiagnostics({ startDate, endDate, selectedPropertyId, selectedClientName });
   const taskItems = getInvoiceCandidateTasks({ startDate, endDate, selectedPropertyId, selectedClientName, enableDebugLog })
     .filter((item) => !propertyIds.length || propertyIds.some((id) => normalizePropertyId(id) === normalizePropertyId(item.propertyId)));
+
+  if (enableDebugLog && (clientName || propertyIds.length > 1)) {
+    logClientCleaningAggregation({
+      taskItems,
+      propertyIds,
+      clientName: clientName || "Multi-property draft",
+    });
+  }
 
   const chemicalItems = getInvoiceChemicalCandidates({
     startDate,
