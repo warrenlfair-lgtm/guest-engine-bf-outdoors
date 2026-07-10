@@ -2917,36 +2917,22 @@ function toggleInvoiceMarker(taskId) {
 }
 
 function refreshBillingCard() {
-  const now = new Date();
-  const currentYear = now.getFullYear();
-  const currentMonth = now.getMonth();
-  
-  const monthStart = new Date(currentYear, currentMonth, 1);
-  const monthEnd = new Date(currentYear, currentMonth + 1, 0);
-  const monthStartString = formatDateValue(monthStart);
-  const monthEndString = formatDateValue(monthEnd);
-  
-  let totalBillableAmount = 0;
-  let invoicedAmount = 0;
-  let totalBillableTaskCount = 0;
-  let invoicedTaskCount = 0;
-  
-  cleaningTasks.forEach(task => {
-    const taskDate = task.service_date;
-    const isCurrentMonth = taskDate >= monthStartString && taskDate <= monthEndString;
-    const taskBillingAmount = getTaskBillingAmount(task);
-    const hasCharge = taskBillingAmount > 0;
-    
-    if (isCurrentMonth && hasCharge) {
-      totalBillableAmount += taskBillingAmount;
-      totalBillableTaskCount += 1;
-      
-      if (task.invoiced) {
-        invoicedAmount += taskBillingAmount;
-        invoicedTaskCount += 1;
-      }
-    }
+  const { startDate, endDate, selectedPropertyId, selectedClientName } = getActiveBillingFilterState();
+  const eligibleRows = getBillingReportRowsForFilters({
+    startDate,
+    endDate,
+    selectedPropertyId,
+    selectedClientName,
+    includeInvoiced: true,
   });
+  const countedRows = eligibleRows.filter((row) => isBillingRowReconciled(row));
+
+  logBillingSummaryDebugRows(countedRows, "included in billing summary billed/invoiced totals");
+
+  const totalBillableAmount = Number(eligibleRows.reduce((sum, row) => sum + Number(row.billableAmount || 0), 0).toFixed(2));
+  const invoicedAmount = Number(countedRows.reduce((sum, row) => sum + Number(row.billableAmount || 0), 0).toFixed(2));
+  const totalBillableTaskCount = eligibleRows.length;
+  const invoicedTaskCount = countedRows.length;
   
   const invoicedAmountEl = document.getElementById("invoicedAmount");
   const totalBillableAmountEl = document.getElementById("totalBillableAmount");
@@ -3905,13 +3891,56 @@ function getBillingReportRows() {
 
   const selectedPropertyId = billingPropertySelect?.value || "";
   const selectedClientName = billingClientSelect?.value || "";
+  const reconciledOnly = billingReconciledOnly ? billingReconciledOnly.checked : true;
 
-  return getBillingReportRowsForFilters({
+  const rows = getBillingReportRowsForFilters({
     startDate,
     endDate,
     selectedPropertyId,
     selectedClientName,
     includeInvoiced: true,
+  });
+
+  return reconciledOnly ? rows.filter((row) => isBillingRowReconciled(row)) : rows;
+}
+
+function isBillingRowReconciled(row) {
+  return isTaskReconciled(row) || isTaskLinkedToFinalizedInvoice(row);
+}
+
+function getActiveBillingFilterState() {
+  const hasExplicitRange = Boolean(billingStartDate?.value && billingEndDate?.value);
+  if (hasExplicitRange) {
+    return {
+      startDate: billingStartDate.value,
+      endDate: billingEndDate.value,
+      selectedPropertyId: billingPropertySelect?.value || "",
+      selectedClientName: billingClientSelect?.value || "",
+    };
+  }
+
+  const today = new Date();
+  const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+  const monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+  return {
+    startDate: formatDateValue(monthStart),
+    endDate: formatDateValue(monthEnd),
+    selectedPropertyId: billingPropertySelect?.value || "",
+    selectedClientName: billingClientSelect?.value || "",
+  };
+}
+
+function logBillingSummaryDebugRows(rows, reason) {
+  rows.forEach((row) => {
+    console.log("[Billing Summary Debug][Included]", {
+      id: row.id,
+      property: row.propertyName || getPropertyName(row.property_id),
+      serviceDate: row.serviceDate || row.service_date || row.scheduled_date || "",
+      amount: Number(row.billableAmount || 0),
+      billingReason: row.billingReasonLabel || "Chargeable",
+      sourceType: "task",
+      whyIncluded: reason,
+    });
   });
 }
 
