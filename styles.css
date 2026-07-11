@@ -2013,6 +2013,13 @@ textarea{
     font-weight: 700;
 }
 
+.invoice-history-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    vertical-align: middle;
+}
+
 .billing-report-amount,
 .billing-report-subtotal,
 .billing-report-grand-total {

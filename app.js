@@ -5,6 +5,7 @@ let operationsReminders = [];
 let chemicalUsageEntries = [];
 let chemicals = [];
 let invoices = [];
+let invoicePropertyLabelById = new Map();
 let currentInvoiceDraft = null;
 let currentInvoiceBatchDrafts = [];
 
@@ -4145,6 +4146,39 @@ async function loadInvoices() {
   }
 
   invoices = data || [];
+  invoicePropertyLabelById = new Map();
+
+  const invoiceIds = invoices.map((invoice) => invoice.id).filter(Boolean);
+  if (!invoiceIds.length) return;
+
+  const { data: invoiceItemsData, error: invoiceItemsError } = await supabaseClient
+    .from("invoice_items")
+    .select("*")
+    .in("invoice_id", invoiceIds);
+
+  if (invoiceItemsError) {
+    console.warn("Could not load invoice item property labels:", invoiceItemsError.message);
+    return;
+  }
+
+  const itemsByInvoiceId = new Map();
+  (invoiceItemsData || []).forEach((item) => {
+    const key = String(item?.invoice_id || "");
+    if (!key) return;
+    if (!itemsByInvoiceId.has(key)) {
+      itemsByInvoiceId.set(key, []);
+    }
+    itemsByInvoiceId.get(key).push(item);
+  });
+
+  invoices.forEach((invoice) => {
+    const key = String(invoice.id || "");
+    if (!key) return;
+    invoicePropertyLabelById.set(key, buildInvoicePropertyHistoryLabel({
+      invoice,
+      invoiceItems: itemsByInvoiceId.get(key) || [],
+    }));
+  });
 }
 
 function isTaskAlreadyInvoiced(task) {
@@ -4559,6 +4593,103 @@ function formatInvoicePrintPeriod(startDate, endDate) {
   return formatInvoicePrintDateValue(startDate || endDate || "");
 }
 
+function normalizeInvoicePropertyLabelName(value) {
+  const name = String(value || "").trim();
+  if (!name) return "";
+  const normalized = name.toLowerCase();
+  if (normalized === "unknown property" || normalized === "multiple properties" || normalized === "all properties") {
+    return "";
+  }
+  return name;
+}
+
+function getSavedInvoicePropertyName(invoice = {}) {
+  const directName = normalizeInvoicePropertyLabelName(invoice.property_name || invoice.propertyName);
+  if (directName) return directName;
+
+  const invoicePropertyId = normalizePropertyId(invoice.property_id ?? invoice.propertyId);
+  if (!invoicePropertyId) return "";
+  const property = properties.find((item) => normalizePropertyId(item.id) === invoicePropertyId);
+  return normalizeInvoicePropertyLabelName(property?.property_name);
+}
+
+function getSelectedInvoicePropertyName(selectedPropertyId = "", selectedPropertyName = "") {
+  const rawSelectedId = String(selectedPropertyId || "").trim();
+  if (!rawSelectedId || rawSelectedId.toLowerCase() === "all") return "";
+
+  const directName = normalizeInvoicePropertyLabelName(selectedPropertyName);
+  if (directName) return directName;
+
+  const normalizedId = normalizePropertyId(rawSelectedId);
+  if (!normalizedId) return "";
+  const property = properties.find((item) => normalizePropertyId(item.id) === normalizedId);
+  return normalizeInvoicePropertyLabelName(property?.property_name);
+}
+
+function getInvoiceItemPropertyName(item) {
+  const directName = normalizeInvoicePropertyLabelName(item?.property_name || item?.propertyName || item?.property);
+  if (directName) return directName;
+
+  const description = String(item?.description || "").trim();
+  if (!description.includes(" - ")) return "";
+  const prefix = String(description.split(" - ")[0] || "").trim();
+  if (!prefix) return "";
+
+  const knownPropertyNames = new Set(
+    properties
+      .map((property) => String(property?.property_name || "").trim().toLowerCase())
+      .filter(Boolean)
+  );
+  return knownPropertyNames.has(prefix.toLowerCase()) ? normalizeInvoicePropertyLabelName(prefix) : "";
+}
+
+function getInvoicePropertyNames(invoiceItems = []) {
+  return [
+    ...new Set(
+      (invoiceItems || [])
+        .map((item) => getInvoiceItemPropertyName(item))
+        .filter(Boolean)
+    ),
+  ];
+}
+
+function buildInvoicePropertyHeaderLabel({ invoice = {}, invoiceItems = [], selectedPropertyId = "", selectedPropertyName = "" } = {}) {
+  const savedPropertyName = getSavedInvoicePropertyName(invoice);
+  if (savedPropertyName) {
+    return `Property: ${savedPropertyName}`;
+  }
+
+  const selectedName = getSelectedInvoicePropertyName(selectedPropertyId, selectedPropertyName);
+  if (selectedName) {
+    return `Property: ${selectedName}`;
+  }
+
+  const propertyNames = getInvoicePropertyNames(invoiceItems);
+  if (propertyNames.length === 1) {
+    return `Property: ${propertyNames[0]}`;
+  }
+  if (propertyNames.length > 1) {
+    return `Properties: ${propertyNames.join(", ")}`;
+  }
+  return "Properties: Multiple Properties";
+}
+
+function buildInvoicePropertyHistoryLabel({ invoice = {}, invoiceItems = [] } = {}) {
+  const savedPropertyName = getSavedInvoicePropertyName(invoice);
+  if (savedPropertyName) {
+    return savedPropertyName;
+  }
+
+  const propertyNames = getInvoicePropertyNames(invoiceItems);
+  if (propertyNames.length === 1) {
+    return propertyNames[0];
+  }
+  if (propertyNames.length > 1) {
+    return propertyNames.join(", ");
+  }
+  return "Multiple Properties";
+}
+
 function renderInvoicePreview() {
   if (!invoicePreviewContainer) return;
 
@@ -4601,7 +4732,16 @@ function renderInvoicePreview() {
     `).join("")
     : `<tr><td colspan="7">No line items in this invoice.</td></tr>`;
 
-  const propertyName = invoice.propertyName || getPropertyName(invoice.propertyId);
+  const selectedPropertyId = String(billingPropertySelect?.value || "").trim();
+  const selectedPropertyName = selectedPropertyId && selectedPropertyId.toLowerCase() !== "all"
+    ? String(billingPropertySelect?.selectedOptions?.[0]?.textContent || "").trim()
+    : "";
+  const invoicePropertyHeaderLabel = buildInvoicePropertyHeaderLabel({
+    invoice,
+    invoiceItems: invoice.items || [],
+    selectedPropertyId,
+    selectedPropertyName,
+  });
   const billingName = invoice.billingCompanyName || invoice.clientName;
   const billingEmail = String(invoice.billingEmail || "").trim();
   const billingAddress = String(invoice.billingAddress || "").trim();
@@ -4650,7 +4790,7 @@ function renderInvoicePreview() {
         <div class="billing-report-meta"><strong>Due Date:</strong> <input type="date" value="${invoice.dueDate || ""}" onchange="updateInvoiceDraftField('dueDate', this.value)"> (${escapeHtml(invoice.paymentTerms || DEFAULT_INVOICE_TERMS)})</div>
         <div class="billing-report-meta"><strong>Service Period:</strong> ${invoice.periodStart} to ${invoice.periodEnd}</div>
         <div class="billing-report-meta"><strong>Status:</strong> ${escapeHtml(String(invoice.status || "draft").toUpperCase())}</div>
-        <div class="billing-report-meta"><strong>Property:</strong> ${escapeHtml(propertyName || "")}</div>
+        <div class="billing-report-meta">${escapeHtml(invoicePropertyHeaderLabel)}</div>
         <h2 class="billing-report-title invoice-document-title">Invoice Preview</h2>
         <div class="billing-report-meta"><strong>Taxable:</strong> <input type="checkbox" ${invoice.taxable ? "checked" : ""} onchange="updateInvoiceDraftField('taxable', this.checked)"></div>
         <div class="billing-report-meta"><strong>Tax Rate (%):</strong> <input type="number" min="0" step="0.01" value="${Number(invoice.taxRate || 0)}" onchange="updateInvoiceDraftField('taxRate', this.value)"></div>
@@ -4708,7 +4848,7 @@ function renderInvoicePreview() {
             <div class="invoice-print-text">Terms: ${escapeHtml(invoice.paymentTerms || DEFAULT_INVOICE_TERMS)}</div>
             <div class="invoice-print-text">Service Period: ${escapeHtml(formatInvoicePrintPeriod(invoice.periodStart || "", invoice.periodEnd || ""))}</div>
             <div class="invoice-print-text">Status: ${escapeHtml(String(invoice.status || "draft").toUpperCase())}</div>
-            <div class="invoice-print-text">Property: ${escapeHtml(propertyName || "")}</div>
+            <div class="invoice-print-text">${escapeHtml(invoicePropertyHeaderLabel)}</div>
           </div>
         </div>
 
@@ -5444,6 +5584,8 @@ async function openInvoiceDraft(invoiceId) {
       sourceId: item.chemical_usage_id || item.task_id || null,
       taskId: item.task_id || null,
       chemicalUsageId: item.chemical_usage_id || null,
+      property_name: item.property_name || "",
+      propertyName: item.property_name || item.propertyName || "",
       description: item.description || "",
       serviceDate: item.service_date || "",
       quantity: Number(item.quantity || 0),
@@ -5460,6 +5602,52 @@ async function openInvoiceDraft(invoiceId) {
   };
 
   renderInvoicePreview();
+}
+
+async function deleteInvoiceDraft(invoiceId) {
+  const invoice = invoices.find((row) => row.id === invoiceId);
+  if (!invoice) return;
+
+  const status = String(invoice.status || "").toLowerCase();
+  if (status !== "draft") {
+    alert("Only draft invoices can be deleted.");
+    return;
+  }
+
+  const invoiceNumber = String(invoice.invoice_number || "(draft)");
+  const confirmed = confirm(
+    `Delete draft invoice ${invoiceNumber}?\n\nThis will permanently delete the draft and its invoice line items.\nCleaning tasks and chemical records must remain unchanged.`
+  );
+  if (!confirmed) return;
+
+  const { error: deleteItemsError } = await supabaseClient
+    .from("invoice_items")
+    .delete()
+    .eq("invoice_id", invoiceId);
+
+  if (deleteItemsError) {
+    alert("Could not delete draft invoice line items: " + deleteItemsError.message);
+    return;
+  }
+
+  const { error: deleteInvoiceError } = await supabaseClient
+    .from("invoices")
+    .delete()
+    .eq("id", invoiceId)
+    .eq("status", "draft");
+
+  if (deleteInvoiceError) {
+    alert("Could not delete draft invoice: " + deleteInvoiceError.message);
+    return;
+  }
+
+  if (currentInvoiceDraft && String(currentInvoiceDraft.id || "") === String(invoiceId)) {
+    currentInvoiceDraft = null;
+    renderInvoicePreview();
+  }
+
+  await loadInvoices();
+  renderInvoiceHistory();
 }
 
 function renderInvoiceHistory() {
@@ -5484,7 +5672,8 @@ function renderInvoiceHistory() {
   }
 
   const tableRows = rows.map((invoice) => {
-    const propertyName = getPropertyName(invoice.property_id);
+    const propertyName = invoicePropertyLabelById.get(String(invoice.id || "")) || "Multiple Properties";
+    const isDraft = String(invoice.status || "").toLowerCase() === "draft";
     return `
       <tr>
         <td>${escapeHtml(invoice.invoice_number || "")}</td>
@@ -5498,7 +5687,10 @@ function renderInvoiceHistory() {
             ${INVOICE_STATUSES.map((status) => `<option value="${status}" ${String(invoice.status || "draft").toLowerCase() === status ? "selected" : ""}>${status}</option>`).join("")}
           </select>
         </td>
-        <td><button type="button" onclick="openInvoiceDraft('${invoice.id}')">Open</button></td>
+        <td class="invoice-history-actions">
+          <button type="button" onclick="openInvoiceDraft('${invoice.id}')">Open</button>
+          ${isDraft ? `<button type="button" class="delete-btn" onclick="deleteInvoiceDraft('${invoice.id}')">Delete</button>` : ""}
+        </td>
       </tr>
     `;
   }).join("");
