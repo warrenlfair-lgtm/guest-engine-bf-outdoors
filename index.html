@@ -440,78 +440,82 @@
 </div>
 
 <div id="propertyModal" class="modal hidden">
-  <div class="modal-card">
-    <h2>Add / Edit Property</h2>
+  <div class="modal-card property-modal-content">
+    <div class="property-modal-header">
+      <h2>Add / Edit Property</h2>
+    </div>
 
-    <label>Property Name</label>
-    <input id="propertyName">
+    <div class="property-modal-body">
+      <label>Property Name</label>
+      <input id="propertyName">
 
-    <label>Client Name</label>
-    <input id="propertyClientName" placeholder="Optional client/owner group name">
+      <label>Client Name</label>
+      <input id="propertyClientName" placeholder="Optional client/owner group name">
 
-    <label>Billing Company Name</label>
-    <input id="propertyBillingCompanyName" placeholder="Optional billing company name">
+      <label>Billing Company Name</label>
+      <input id="propertyBillingCompanyName" placeholder="Optional billing company name">
 
-    <label>Billing Email</label>
-    <input id="propertyBillingEmail" type="email" placeholder="billing@example.com">
+      <label>Billing Email</label>
+      <input id="propertyBillingEmail" type="email" placeholder="billing@example.com">
 
-    <label>Billing Address</label>
-    <textarea id="propertyBillingAddress" rows="2" placeholder="Street, City, State, ZIP"></textarea>
+      <label>Billing Address</label>
+      <textarea id="propertyBillingAddress" rows="2" placeholder="Street, City, State, ZIP"></textarea>
 
-    <label>Account / Reference Number</label>
-    <input id="propertyAccountReference" placeholder="Optional account number">
+      <label>Account / Reference Number</label>
+      <input id="propertyAccountReference" placeholder="Optional account number">
 
-    <label>Address</label>
-    <input id="propertyAddress">
+      <label>Address</label>
+      <input id="propertyAddress">
 
-    <label>Hostaway iCal URL</label>
-    <input id="propertyIcal">
+      <label>Hostaway iCal URL</label>
+      <input id="propertyIcal">
 
-    <label>SafetyCulture Checklist Link</label>
-    <input id="safetycultureChecklistUrl" type="url" placeholder="https://...">
+      <label>SafetyCulture Checklist Link</label>
+      <input id="safetycultureChecklistUrl" type="url" placeholder="https://...">
 
-    <label>Standard Service Day</label>
-    <select id="standardDay">
-      <option>Monday</option>
-      <option>Tuesday</option>
-      <option selected>Wednesday</option>
-      <option>Thursday</option>
-      <option>Friday</option>
-      <option>Saturday</option>
-      <option>Sunday</option>
-    </select>
-
-      <label>Guest Ready Coverage Rule</label>
-      <select id="coverageRule">
-        <option value="none">none = No Flex / service day only</option>
-        <option value="before">before = Service day -1 day only</option>
-        <option value="after">after = Service day +1 day only</option>
-        <option value="both" selected>both = Service day +/- 1 day</option>
+      <label>Standard Service Day</label>
+      <select id="standardDay">
+        <option>Monday</option>
+        <option>Tuesday</option>
+        <option selected>Wednesday</option>
+        <option>Thursday</option>
+        <option>Friday</option>
+        <option>Saturday</option>
+        <option>Sunday</option>
       </select>
-      <input id="coverageDays" type="hidden" value="2">
 
-    <label>Billable Guest Ready Charge</label>
-    <input id="offCycleCharge" type="number" value="65">
+        <label>Guest Ready Coverage Rule</label>
+        <select id="coverageRule">
+          <option value="none">none = No Flex / service day only</option>
+          <option value="before">before = Service day -1 day only</option>
+          <option value="after">after = Service day +1 day only</option>
+          <option value="both" selected>both = Service day +/- 1 day</option>
+        </select>
+        <input id="coverageDays" type="hidden" value="2">
 
-    <label>Default Cleaning Rate</label>
-    <input id="propertyDefaultCleaningRate" type="number" min="0" step="0.01" value="0">
+      <label>Billable Guest Ready Charge</label>
+      <input id="offCycleCharge" type="number" value="65">
 
-    <label>Taxable</label>
-    <select id="propertyTaxable">
-      <option value="yes">Yes</option>
-      <option value="no">No</option>
-    </select>
+      <label>Default Cleaning Rate</label>
+      <input id="propertyDefaultCleaningRate" type="number" min="0" step="0.01" value="0">
 
-    <label>Tax Rate (%)</label>
-    <input id="propertyTaxRate" type="number" min="0" step="0.01" value="0">
+      <label>Taxable</label>
+      <select id="propertyTaxable">
+        <option value="yes">Yes</option>
+        <option value="no">No</option>
+      </select>
 
-    <label>Payment Terms</label>
-    <input id="propertyPaymentTerms" placeholder="e.g., Net 15">
+      <label>Tax Rate (%)</label>
+      <input id="propertyTaxRate" type="number" min="0" step="0.01" value="0">
 
-    <label>Invoice Notes</label>
-    <textarea id="propertyInvoiceNotes" rows="3" placeholder="Payment instructions or notes"></textarea>
+      <label>Payment Terms</label>
+      <input id="propertyPaymentTerms" placeholder="e.g., Net 15">
 
-    <div class="modal-actions">
+      <label>Invoice Notes</label>
+      <textarea id="propertyInvoiceNotes" rows="3" placeholder="Payment instructions or notes"></textarea>
+    </div>
+
+    <div class="modal-actions property-modal-footer">
       <button id="cancelBtn">Cancel</button>
       <button id="savePropertyBtn">Save Property</button>
     </div>

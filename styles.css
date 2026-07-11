@@ -631,6 +631,48 @@ button:hover {
     padding:25px;
 }
 
+#propertyModal {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    align-items: flex-start;
+    padding: 20px 12px;
+}
+
+.property-modal-content {
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.property-modal-header {
+    flex: 0 0 auto;
+    background: white;
+}
+
+.property-modal-header h2 {
+    margin: 0;
+}
+
+.property-modal-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-right: 2px;
+}
+
+.property-modal-footer {
+    flex: 0 0 auto;
+    position: sticky;
+    bottom: 0;
+    z-index: 5;
+    background: white;
+    border-top: 1px solid #ddd;
+    padding: 12px;
+    margin-top: 0;
+}
+
 .edit-task-modal-card {
     width: min(680px, 96vw);
     max-height: 90vh;
@@ -854,6 +896,17 @@ textarea{
 
     .modal-actions {
         justify-content: stretch;
+    }
+
+    #propertyModal {
+        align-items: center;
+        padding: 8px;
+    }
+
+    .modal-card.property-modal-content {
+        min-height: auto;
+        max-height: 90vh;
+        border-radius: 12px;
     }
 
     .modal-actions button {
