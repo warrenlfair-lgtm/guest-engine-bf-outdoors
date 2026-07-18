@@ -683,6 +683,31 @@
   </div>
 </div>
 
+<div id="deleteCleaningModal" class="modal hidden">
+  <div class="modal-card delete-cleaning-modal-card">
+    <h2>Delete this scheduled cleaning?</h2>
+    <p>This will permanently remove the cleaning task.</p>
+    <p>Type DELETE to confirm.</p>
+    <p id="deleteCleaningSyncWarning" class="delete-cleaning-sync-warning hidden">
+      This cleaning may return the next time iCal is synced unless the source reservation is removed or the task is marked to remain deleted.
+    </p>
+
+    <label for="deleteCleaningConfirmInput">Confirmation</label>
+    <input
+      id="deleteCleaningConfirmInput"
+      type="text"
+      autocomplete="off"
+      spellcheck="false"
+      placeholder="Type DELETE"
+    >
+
+    <div class="modal-actions">
+      <button id="deleteCleaningCancelBtn" type="button">Cancel</button>
+      <button id="deleteCleaningConfirmBtn" type="button" class="delete-btn" disabled>Delete</button>
+    </div>
+  </div>
+</div>
+
 <div id="chemicalUsageModal" class="modal hidden">
   <div class="modal-card chemical-modal-card">
     <h2>Add Chemical Usage</h2>

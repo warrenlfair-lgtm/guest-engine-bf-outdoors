@@ -28,6 +28,7 @@ let editingReminderId = null;
 let editingChemicalUsageId = null;
 let editingChemicalSettingId = null;
 let cleaningModalInitialState = null;
+let deleteCleaningResolver = null;
 let isChemicalNameChangeListenerAttached = false;
 
 let selectedPropertyFilter = "";
@@ -155,6 +156,11 @@ const pinInput = document.getElementById("pinInput");
 const pinError = document.getElementById("pinError");
 const pinUnlockBtn = document.getElementById("pinUnlockBtn");
 const pinCancelBtn = document.getElementById("pinCancelBtn");
+const deleteCleaningModal = document.getElementById("deleteCleaningModal");
+const deleteCleaningConfirmInput = document.getElementById("deleteCleaningConfirmInput");
+const deleteCleaningCancelBtn = document.getElementById("deleteCleaningCancelBtn");
+const deleteCleaningConfirmBtn = document.getElementById("deleteCleaningConfirmBtn");
+const deleteCleaningSyncWarning = document.getElementById("deleteCleaningSyncWarning");
 const weekTasksContainer = document.getElementById("weekTasks");
 const weekTasksCalendarContainer = document.getElementById("weekTasksCalendar");
 const weekViewToggleButtons = Array.from(document.querySelectorAll(".week-view-btn"));
@@ -255,10 +261,38 @@ if (cleaningModal) {
 
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
+  if (deleteCleaningModal && !deleteCleaningModal.classList.contains("hidden")) {
+    event.preventDefault();
+    closeDeleteCleaningModal(false);
+    return;
+  }
   if (cleaningModal?.classList.contains("hidden")) return;
   event.preventDefault();
   closeCleaningModal();
 });
+
+if (deleteCleaningModal) {
+  deleteCleaningModal.addEventListener("click", (event) => {
+    if (event.target === deleteCleaningModal) {
+      closeDeleteCleaningModal(false);
+    }
+  });
+}
+
+if (deleteCleaningCancelBtn) {
+  deleteCleaningCancelBtn.addEventListener("click", () => closeDeleteCleaningModal(false));
+}
+
+if (deleteCleaningConfirmBtn) {
+  deleteCleaningConfirmBtn.addEventListener("click", () => closeDeleteCleaningModal(true));
+}
+
+if (deleteCleaningConfirmInput) {
+  deleteCleaningConfirmInput.addEventListener("input", () => {
+    if (!deleteCleaningConfirmBtn) return;
+    deleteCleaningConfirmBtn.disabled = deleteCleaningConfirmInput.value !== "DELETE";
+  });
+}
 
 if (addChemicalBtn) {
   addChemicalBtn.addEventListener("click", () => openChemicalUsageModal());
@@ -1128,6 +1162,64 @@ function closeCleaningModal(options = {}) {
   cleaningModalInitialState = null;
   renderCleaningSafetyCultureAccess();
   renderChemicalUsageForCurrentTask();
+}
+
+function isAutoCreatedIcalGuestReadyTask(task) {
+  if (!task) return false;
+  if (task.service_type !== "Guest Ready") return false;
+  if (task.source_type === "reservation_guest_ready") return true;
+
+  const sourceKey = String(task.source_key || "");
+  return sourceKey.startsWith("gr:");
+}
+
+function closeDeleteCleaningModal(confirmed) {
+  if (!deleteCleaningModal) return;
+
+  deleteCleaningModal.classList.add("hidden");
+  if (deleteCleaningConfirmInput) {
+    deleteCleaningConfirmInput.value = "";
+  }
+  if (deleteCleaningConfirmBtn) {
+    deleteCleaningConfirmBtn.disabled = true;
+  }
+  if (deleteCleaningSyncWarning) {
+    deleteCleaningSyncWarning.classList.add("hidden");
+  }
+
+  const resolver = deleteCleaningResolver;
+  deleteCleaningResolver = null;
+  if (resolver) {
+    resolver(Boolean(confirmed));
+  }
+}
+
+function openDeleteCleaningModal(task) {
+  if (!deleteCleaningModal) {
+    return Promise.resolve(confirm("Delete this cleaning?"));
+  }
+
+  if (deleteCleaningConfirmInput) {
+    deleteCleaningConfirmInput.value = "";
+  }
+  if (deleteCleaningConfirmBtn) {
+    deleteCleaningConfirmBtn.disabled = true;
+  }
+
+  if (deleteCleaningSyncWarning) {
+    const showSyncWarning = isAutoCreatedIcalGuestReadyTask(task);
+    deleteCleaningSyncWarning.classList.toggle("hidden", !showSyncWarning);
+  }
+
+  deleteCleaningModal.classList.remove("hidden");
+
+  if (deleteCleaningConfirmInput) {
+    setTimeout(() => deleteCleaningConfirmInput.focus(), 0);
+  }
+
+  return new Promise((resolve) => {
+    deleteCleaningResolver = resolve;
+  });
 }
 
 function openAlertDetail(propertyName, turnoverDate, checkOutDate, checkInDate) {
@@ -2790,9 +2882,15 @@ async function saveCleaningTask() {
   }
 
   const existingTask = editingCleaningId ? cleaningTasks.find((task) => task.id === editingCleaningId) : null;
+  const existingCharge = Number(existingTask?.charge || 0);
   const completedAt = taskStatus === "Completed"
     ? existingTask?.completed_at || new Date().toISOString()
     : null;
+
+  if (editingCleaningId && existingTask && isTaskLinkedToFinalizedInvoice(existingTask) && charge !== existingCharge) {
+    alert("This task is already on a finalized invoice. The finalized charge cannot be changed.");
+    return;
+  }
 
   // If a task's date is being changed, flag it as manually modified
   // so that future syncs do not overwrite it or recreate it on the original date.
@@ -2839,20 +2937,62 @@ async function saveCleaningTask() {
 }
 
 async function deleteCleaningTask(id) {
-  const confirmed = confirm("Delete this cleaning?");
-  if (!confirmed) return;
-
-  const { error } = await supabaseClient
-    .from("cleaning_tasks")
-    .delete()
-    .eq("id", id);
-
-  if (error) {
-    alert("Error deleting cleaning: " + error.message);
+  const task = cleaningTasks.find((item) => item.id === id);
+  if (!task) {
+    alert("Cleaning task not found.");
     return;
   }
 
-  loadData();
+  const confirmed = await openDeleteCleaningModal(task);
+  if (!confirmed) return;
+
+  const { data: deletedRows, error } = await supabaseClient
+    .from("cleaning_tasks")
+    .delete()
+    .eq("id", id)
+    .select("id");
+
+  if (error) {
+    console.error("[DeleteCleaning] Failed to delete task", { taskId: id, supabaseError: error });
+    alert(error.message || "Delete failed.");
+    return;
+  }
+
+  if (!deletedRows || deletedRows.length === 0) {
+    const failureMessage = `Delete failed: no matching task row was removed for task ${id}.`;
+    console.error("[DeleteCleaning] Delete returned zero rows", { taskId: id, deletedRows });
+    alert(failureMessage);
+    return;
+  }
+
+  const { data: verificationRows, error: verificationError } = await supabaseClient
+    .from("cleaning_tasks")
+    .select("id")
+    .eq("id", id)
+    .limit(1);
+
+  if (verificationError) {
+    console.error("[DeleteCleaning] Verification query failed", { taskId: id, supabaseError: verificationError });
+    alert(verificationError.message || "Delete verification failed.");
+    return;
+  }
+
+  if (verificationRows && verificationRows.length > 0) {
+    const failureMessage = "Delete failed: task still exists after deletion attempt.";
+    console.error("[DeleteCleaning] Task still exists after delete", { taskId: id, verificationRows });
+    alert(failureMessage);
+    return;
+  }
+
+  await loadCleaningTasks();
+  await loadChemicalUsageEntries();
+
+  renderTaskViews();
+  renderProperties();
+  renderBillingReport();
+  renderInvoicePreview();
+
+  statusMessage.textContent = "Scheduled cleaning deleted successfully.";
 }
 
 async function backfillSourceKeys() {
@@ -2963,6 +3103,11 @@ function clearPropertyForm() {
 function toggleInvoiceMarker(taskId) {
   const task = cleaningTasks.find(t => t.id === taskId);
   if (!task) return;
+
+  if (isTaskLinkedToFinalizedInvoice(task)) {
+    alert("This task is already linked to a finalized invoice and cannot be changed.");
+    return;
+  }
   
   const newInvoiced = !task.invoiced;
   
@@ -3582,7 +3727,11 @@ function getBillingReportRowsForFilters({
   const scopePropertyIds = new Set(resolvePropertyIdsForScope({ selectedPropertyId, selectedClientName }).map((id) => normalizePropertyId(id)));
 
   return cleaningTasks
-    .filter((task) => isTaskReconciled(task) || String(task.status || "").toLowerCase() === "completed")
+    .filter((task) => {
+      if (isTaskReconciled(task)) return true;
+      if (task.service_type === "Weekly Standard") return false;
+      return String(task.status || "").toLowerCase() === "completed";
+    })
     .filter((task) => {
       const taskDate = task.service_date || task.scheduled_date;
       return Boolean(taskDate && taskDate >= startDate && taskDate <= endDate);
@@ -4340,7 +4489,7 @@ function renderBillingReport() {
         <h2 class="billing-report-title">Cleaning Billing Report</h2>
         <div class="billing-report-meta">Billing Period: ${startDate} to ${endDate}</div>
         <div class="billing-report-meta">Generated: ${generatedDate}</div>
-        <div class="empty">No billable completed tasks found for the selected filters.</div>
+        <div class="empty">No billable reconciled tasks found for the selected filters.</div>
         ${renderBillingReportFooter()}
       </div>
     `;
@@ -5246,7 +5395,7 @@ function generateInvoicePreviewFromFilters() {
   const taxOverride = invoiceTaxEnabled?.value || "property";
   const includeNonBillable = invoiceIncludeNonBillableChemicals?.checked === true;
   const emptyReasons = [
-    "No completed chargeable tasks were found in the selected date range.",
+    "No reconciled or completed chargeable tasks were found in the selected date range.",
     "All eligible tasks may already be invoiced.",
     "Included/no-charge services are excluded.",
     "Chemical entries may be non-billable or have a $0 rate.",
@@ -6495,8 +6644,14 @@ function renderRouteFragmentationAnalytics() {
 
 function shouldShowReconcileForTask(task) {
   if (!task) return false;
-  if (task.service_type === "Weekly Standard") return false;
   if (isTaskReconciled(task)) return false;
+
+  if (task.service_type === "Weekly Standard") {
+    const status = String(task.status || "").toLowerCase();
+    if (status === "cancelled" || status === "void" || status === "deleted") return false;
+    if (isTaskLinkedToFinalizedInvoice(task)) return false;
+    return Number(task.charge || 0) > 0;
+  }
 
   if (isTaskGuestReady(task)) {
     const guestReadyBilling = getGuestReadyBillingDetails(task);
@@ -6509,6 +6664,14 @@ function shouldShowReconcileForTask(task) {
 
 function isTaskReconciled(task) {
   return task.invoiced === true || task.invoiced === 1 || task.invoiced === "true";
+}
+
+function getWeeklyReconciliationBillingLine(task, taskBillingAmount) {
+  if (!task || task.service_type !== "Weekly Standard") return "";
+  if (Number(taskBillingAmount || 0) <= 0) return "";
+  return isTaskReconciled(task) || isTaskLinkedToFinalizedInvoice(task)
+    ? `<div class="task-line"><small>Billing: Reconciled</small></div>`
+    : `<div class="task-line"><small>Billing: Awaiting Reconciliation</small></div>`;
 }
 
 function renderTaskCard(task) {
@@ -6526,6 +6689,8 @@ function renderTaskCard(task) {
   const alertBadge = getAlertBadgeForTask(task);
   const showReconcile = shouldShowReconcileForTask(task);
   const invoiceMarkerClass = task.invoiced ? "invoice-marker-checked" : "invoice-marker-unchecked";
+  const taskBillingAmount = getTaskBillingAmount(task);
+  const weeklyReconcileLine = getWeeklyReconciliationBillingLine(task, taskBillingAmount);
 
   return `
     <div class="${cardClass}">
@@ -6543,6 +6708,8 @@ function renderTaskCard(task) {
         <div><strong>Service Date:</strong> ${task.service_date || task.scheduled_date || "Not set"}</div>
         <div><strong>Task Type:</strong> ${task.service_type || "Manual"}</div>
         <div><strong>Guest Ready:</strong> ${isTaskGuestReady(task) ? "Yes" : "No"}</div>
+        ${taskBillingAmount > 0 ? `<div><strong>Charge:</strong> $${taskBillingAmount}</div>` : ""}
+        ${weeklyReconcileLine}
         ${task.check_in_date ? `<div><strong>Check-In:</strong> ${task.check_in_date}</div>` : ""}
         <div><strong>Status:</strong> <span class="status-badge ${badgeClass}">${status}</span></div>
       </div>
@@ -6765,7 +6932,7 @@ function renderWeekViewListTaskCard(task) {
       : task.guest_ready
         ? `<span class="status-badge badge-yellow">GUEST READY</span>`
         : task.off_cycle
-          ? `<span class="status-badge badge-purple">OFF CYCLE</span>`
+          ? `<span class="status-badge badge-purple">${task.service_type === "Weekly Standard" ? "WEEKLY STANDARD" : "OFF CYCLE"}</span>`
           : `<span class="status-badge badge-blue">SCHEDULED</span>`;
 
   const billingLine = guestReadyBilling
@@ -6777,6 +6944,7 @@ function renderWeekViewListTaskCard(task) {
     : taskBillingAmount > 0
       ? `<div class="task-line"><small>Billing: Manual Charge</small></div>`
       : "";
+  const weeklyReconcileLine = getWeeklyReconciliationBillingLine(task, taskBillingAmount);
 
   const sameDayBadge = isSameDayCheckInGuestReadyTask(task)
     ? `<span class="task-alert-badge badge-alert-red">🚨 Same-Day Check-In</span>`
@@ -6799,6 +6967,7 @@ function renderWeekViewListTaskCard(task) {
       <div class="task-line"><small>Guest Ready: ${isTaskGuestReady(task) ? "Yes" : "No"}</small></div>
       ${taskBillingAmount > 0 ? `<div class="task-line">$${taskBillingAmount}</div>` : ""}
       ${billingLine}
+      ${weeklyReconcileLine}
       ${task.check_in_date ? `<div class="task-line"><small>Prior to check-in: ${task.check_in_date}</small></div>` : ""}
       <div class="task-line"><small>Status: ${status}</small></div>
       ${task.notes ? `<div class="task-line"><small>Notes: ${stripManualBillingOverrideTag(task.notes)}</small></div>` : ""}
@@ -6884,7 +7053,7 @@ function renderWeekViewCalendar(weekTasks) {
                         </div>
                         <div class="calendar-task-action-section">
                           ${task.status !== "Completed" ? `<button class="calendar-task-btn complete-btn" onclick="markCleaningComplete('${task.id}')">Complete</button>` : '<div class="calendar-task-btn-placeholder"></div>'}
-                          <button class="calendar-task-btn delete-btn" onclick="if (confirm('Delete this task?')) { deleteCleaningTask('${task.id}'); }">Delete</button>
+                          <button class="calendar-task-btn delete-btn" onclick="deleteCleaningTask('${task.id}')">Delete</button>
                         </div>
                       </div>
                     `;
@@ -7054,7 +7223,7 @@ function renderProperties() {
               : task.guest_ready
                 ? `<span class="status-badge badge-yellow">GUEST READY</span>`
                 : task.off_cycle
-                  ? `<span class="status-badge badge-purple">OFF CYCLE</span>`
+                  ? `<span class="status-badge badge-purple">${task.service_type === "Weekly Standard" ? "WEEKLY STANDARD" : "OFF CYCLE"}</span>`
                   : `<span class="status-badge badge-blue">SCHEDULED</span>`;
 
           const billingLine = guestReadyBilling
@@ -7066,6 +7235,7 @@ function renderProperties() {
             : taskBillingAmount > 0
               ? `<div class="task-line"><small>Billing: Manual Charge</small></div>`
               : "";
+          const weeklyReconcileLine = getWeeklyReconciliationBillingLine(task, taskBillingAmount);
 
           const sameDayBadge = isSameDayCheckInGuestReadyTask(task)
             ? `<span class="task-alert-badge badge-alert-red">🚨 Same-Day Check-In</span>`
@@ -7086,6 +7256,7 @@ function renderProperties() {
               ${sameDayBadge}
               ${taskBillingAmount > 0 ? `<div class="task-line">$${taskBillingAmount}</div>` : ""}
               ${billingLine}
+              ${weeklyReconcileLine}
               <div class="task-line"><small>Status: ${task.status}</small></div>
               ${task.completed_at ? `<div class="task-line"><small>Completed: ${new Date(task.completed_at).toLocaleString()}</small></div>` : ""}
               ${task.check_in_date ? `<div class="task-line"><small>Prior to check-in: ${task.check_in_date}</small></div>` : ""}

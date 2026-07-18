@@ -737,6 +737,31 @@ button:hover {
     width: 360px;
 }
 
+.delete-cleaning-modal-card {
+    width: 520px;
+    max-width: 96%;
+}
+
+.delete-cleaning-modal-card h2 {
+    margin-top: 0;
+    margin-bottom: 10px;
+}
+
+.delete-cleaning-modal-card p {
+    margin: 0 0 10px;
+    color: #334155;
+}
+
+.delete-cleaning-sync-warning {
+    margin-top: 14px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid #f59e0b;
+    background: #fffbeb;
+    color: #92400e;
+    font-size: 14px;
+}
+
 .chemical-modal-card {
     width: 420px;
     max-width: 96%;
